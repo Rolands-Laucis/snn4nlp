@@ -7,16 +7,18 @@ from torch.utils.data import DataLoader, TensorDataset
 from readers import ReadUPOSInputFile
 import argparse
 from pathlib import Path
+import json
+from datetime import datetime
 
 parser = argparse.ArgumentParser(description='Train an SNN for UPOS tagging')
 parser.add_argument('--limit', type=int, default=100, help='Limit the number of sentences for testing (default: 100)')
 parser.add_argument('--input_file_prefix', type=str, default='pos_d50', help='Prefix for input files (default: pos)')
 parser.add_argument('--context_size', type=int, default=5, help='N context words; predict UPOS of the last token in the window (default: 5)')
 parser.add_argument('--num_hidden', type=int, default=64, help='Number of hidden units (default: 64)')
-parser.add_argument('--num_steps', type=int, default=20, help='Poisson/SNN simulation steps (default: 10)')
+parser.add_argument('--sim_steps', type=int, default=20, help='Poisson/SNN simulation steps (default: 10)')
 parser.add_argument('--beta', type=float, default=0.95, help='Leaky neuron decay factor (default: 0.95)')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training (default: 32)')
-parser.add_argument('--num_epochs', type=int, default=5, help='Number of training epochs (default: 5)')
+parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs (default: 5)')
 parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning rate (default: 0.001)')
 args = parser.parse_args()
 
@@ -27,17 +29,10 @@ pos_train_data, embedding_dim = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_f
 pos_dev_data, _ = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_dev.tsv', limit=args.limit)
 pos_test_data, _ = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_test.tsv', limit=args.limit)
 
+pos_train_data += pos_dev_data  # combine train and dev for training
+
 if not embedding_dim and pos_train_data and pos_train_data[0] and len(pos_train_data[0][0]) > 3:
     embedding_dim = len(pos_train_data[0][0][3:])
-
-# Get parameters from CLI arguments
-context_size = args.context_size
-num_hidden = args.num_hidden
-num_steps = args.num_steps
-beta = args.beta
-batch_size = args.batch_size
-num_epochs = args.num_epochs
-learning_rate = args.learning_rate
 
 # Build UPOS tag vocabulary from training data
 upos_tags = set()
@@ -95,7 +90,14 @@ def build_rolling_context_samples(sentences, upos_map, context_n, embedding_dim)
 X_train, y_train = build_rolling_context_samples(
     pos_train_data[:args.limit] if args.limit else pos_train_data,  # limit to first 100 sentences for quick testing; remove slice for full data
     upos_to_idx,
-    context_size,
+    args.context_size,
+    embedding_dim,
+)
+
+X_test, y_test = build_rolling_context_samples(
+    pos_test_data[:args.limit] if args.limit else pos_test_data,
+    upos_to_idx,
+    args.context_size,
     embedding_dim,
 )
 
@@ -151,7 +153,7 @@ if False:
     # exit(0)
 
     setup_debug_input = X_train[poisson_debug_selected_sample, -1, :].unsqueeze(0).unsqueeze(0)     # [1, 1, emb_dim]
-    setup_debug_spikes = poisson_encode(setup_debug_input, num_steps)    # [T, 1, emb_dim]
+    setup_debug_spikes = poisson_encode(setup_debug_input, args.sim_steps)    # [T, 1, emb_dim]
     print(f"  input shape: {setup_debug_input.shape}")
     print(f"  spike shape: {setup_debug_spikes.shape}")
     print(f"  mean spike rate: {setup_debug_spikes.float().mean().item():.4f}")
@@ -186,32 +188,62 @@ class ContextSNN(nn.Module):
         return mem2
 
 
-input_size = context_size * embedding_dim
-net = ContextSNN(input_size, num_hidden, num_ud_tags, beta)
+input_size = args.context_size * embedding_dim
+net = ContextSNN(input_size, args.num_hidden, num_ud_tags, args.beta)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 net = net.to(device)
 
 train_ds = TensorDataset(X_train, y_train)
-train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
 
 loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
+optimizer = torch.optim.Adam(net.parameters(), lr=args.learning_rate)
 
 print(f"\nTraining config:")
 print(f"  Device: {device}")
-print(f"  Context size: {context_size}")
+print(f"  Context size: {args.context_size}")
 print(f"  Input size: {input_size}")
-print(f"  Hidden size: {num_hidden}")
+print(f"  Hidden size: {args.num_hidden}")
 print(f"  Output classes: {num_ud_tags}")
-print(f"  Num steps: {num_steps}")
-print(f"  Batch size: {batch_size}")
-print(f"  Epochs: {num_epochs}")
+print(f"  Num steps: {args.sim_steps}")
+print(f"  Batch size: {args.batch_size}")
+print(f"  Epochs: {args.epochs}")
+
+
+def evaluate_model(model, features, labels, batch_size, device, n_steps):
+    eval_ds = TensorDataset(features, labels)
+    eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False)
+    model.eval()
+
+    running_loss = 0.0
+    running_correct = 0
+    running_total = 0
+
+    with torch.no_grad():
+        for xb, yb in eval_loader:
+            xb = xb.to(device)
+            yb = yb.to(device)
+
+            spike_seq = poisson_encode(xb, n_steps).to(device)
+            logits = model(spike_seq)
+            loss = loss_fn(logits, yb)
+
+            running_loss += loss.item() * xb.size(0)
+            preds = torch.argmax(logits, dim=1)
+            running_correct += (preds == yb).sum().item()
+            running_total += xb.size(0)
+
+    avg_loss = running_loss / max(1, running_total)
+    avg_acc = running_correct / max(1, running_total)
+    return avg_loss, avg_acc
 
 
 # Train (samples are shuffled by DataLoader each epoch)
+final_loss = None
+final_acc = None
 net.train()
-for epoch in range(num_epochs):
+for epoch in range(args.epochs):
     running_loss = 0.0
     running_correct = 0
     running_total = 0
@@ -220,7 +252,7 @@ for epoch in range(num_epochs):
         xb = xb.to(device)                                          # [B, context_n, emb_dim]
         yb = yb.to(device)                                          # [B]
 
-        spike_seq = poisson_encode(xb, num_steps).to(device)        # [T, B, input_size]
+        spike_seq = poisson_encode(xb, args.sim_steps).to(device)        # [T, B, input_size]
         logits = net(spike_seq)                                     # [B, num_ud_tags]
         loss = loss_fn(logits, yb)
 
@@ -235,6 +267,37 @@ for epoch in range(num_epochs):
 
     epoch_loss = running_loss / max(1, running_total)
     epoch_acc = running_correct / max(1, running_total)
-    print(f"Epoch {epoch + 1}/{num_epochs} | loss: {epoch_loss:.4f} | acc: {epoch_acc:.4f}")
+    final_loss = epoch_loss
+    final_acc = epoch_acc
+    print(f"Epoch {epoch + 1}/{args.epochs} | loss: {epoch_loss:.4f} | acc: {epoch_acc:.4f}")
 
 print("Training finished.")
+
+test_loss, test_acc = evaluate_model(net, X_test, y_test, args.batch_size, device, args.sim_steps)
+print(f"Test evaluation | loss: {test_loss:.4f} | acc: {test_acc:.4f}")
+
+# Export training metadata and results to JSON
+training_metadata = {
+    "training_config": {
+        "embedding_dim": int(embedding_dim),
+        "input_size": input_size,
+        "num_ud_tags": num_ud_tags,
+        "num_training_samples": int(X_train.shape[0]),
+        "device": str(device),
+    } | vars(args),  # include all CLI args in metadata
+    "results": {
+        "train_loss": float(final_loss) if final_loss is not None else None,
+        "train_accuracy": float(final_acc) if final_acc is not None else None,
+        "test_loss": float(test_loss),
+        "test_accuracy": float(test_acc),
+    },
+}
+
+output_dir = PROJECT_ROOT / 'output_results' / 'upos'
+output_dir.mkdir(parents=True, exist_ok=True)
+metadata_file = output_dir / f'{"_".join([datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), str(args.epochs), str(round(final_acc * 100, 2))])}.json'
+
+with open(metadata_file, 'w', encoding='utf-8') as f:
+    json.dump(training_metadata, f, indent=2)
+
+print(f"\nTraining metadata exported to {metadata_file}")
