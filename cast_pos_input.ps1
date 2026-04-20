@@ -1,0 +1,1 @@
+python scripts/cast_pos_input.py
