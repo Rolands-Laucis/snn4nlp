@@ -11,6 +11,7 @@ import json
 from datetime import datetime
 
 parser = argparse.ArgumentParser(description='Train an SNN for UPOS tagging')
+parser.add_argument('--input_mode', type=str, default='spatial', help='Input mode for the SNN [spatial|temporal] (default: spatial)')
 parser.add_argument('--limit', type=int, default=100, help='Limit the number of sentences for testing (default: 100)')
 parser.add_argument('--input_file_prefix', type=str, default='pos_d50', help='Prefix for input files (default: pos)')
 parser.add_argument('--context_size', type=int, default=5, help='N context words; predict UPOS of the last token in the window (default: 5)')
@@ -21,6 +22,9 @@ parser.add_argument('--batch_size', type=int, default=32, help='Batch size for t
 parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs (default: 5)')
 parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning rate (default: 0.001)')
 args = parser.parse_args()
+input_mode = args.input_mode.lower()
+if input_mode not in {'spatial', 'temporal'}:
+    raise ValueError("--input_mode must be either 'spatial' or 'temporal'")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAST_POS_DIR = PROJECT_ROOT / 'input_data' / 'cast_pos'
@@ -36,7 +40,7 @@ if not embedding_dim and pos_train_data and pos_train_data[0] and len(pos_train_
 
 # Build UPOS tag vocabulary from training data
 upos_tags = set()
-for sentence in pos_train_data:
+for sentence in pos_train_data + pos_test_data:
     for word_info in sentence:
         upos_tags.add(word_info[1])  # upos is at index 1
 
@@ -46,7 +50,7 @@ num_ud_tags = len(upos_to_idx)
 
 print(f"UPOS tags ({num_ud_tags}): {upos_tags}")
 
-def build_rolling_context_samples(sentences, upos_map, context_n, embedding_dim):
+def build_rolling_context_samples(sentences, upos_map, context_n, embedding_dim, skip_unknown_labels=False):
     """
     Build (X, y) where each sample predicts the UPOS of the last token in a context window.
 
@@ -58,6 +62,7 @@ def build_rolling_context_samples(sentences, upos_map, context_n, embedding_dim)
     """
     x_list = []
     y_list = []
+    skipped_samples = 0
     
     zero_embedding = torch.zeros(embedding_dim, dtype=torch.float32)
 
@@ -78,11 +83,23 @@ def build_rolling_context_samples(sentences, upos_map, context_n, embedding_dim)
                         )
                     ctx_embeddings.append(embedding)
 
+            upos = sentence[t][1]
+            if upos not in upos_map:
+                if skip_unknown_labels:
+                    skipped_samples += 1
+                    continue
+                raise KeyError(f"Unknown UPOS tag '{upos}' not found in training vocabulary")
+
             x_list.append(torch.stack(ctx_embeddings, dim=0))       # [context_n, embedding_dim]
-            y_list.append(upos_map[sentence[t][1]])                 # scalar class index (upos at index 1)
+            y_list.append(upos_map[upos])                           # scalar class index (upos at index 1)
+
+    if not x_list:
+        raise ValueError("No valid samples were produced for sample creation.")
 
     X = torch.stack(x_list, dim=0)                                  # [num_samples, context_n, embedding_dim]
     y = torch.tensor(y_list, dtype=torch.long)                      # [num_samples]
+    if skip_unknown_labels and skipped_samples:
+        print(f"Skipped {skipped_samples} samples with unknown UPOS labels during sample creation.")
     return X, y
 
 
@@ -99,19 +116,22 @@ X_test, y_test = build_rolling_context_samples(
     upos_to_idx,
     args.context_size,
     embedding_dim,
+    skip_unknown_labels=True,
 )
 
 print(f"Training samples: {X_train.shape[0]}")
 print(f"X_train shape: {X_train.shape}  # [samples, context, embed_dim]")
 print(f"y_train shape: {y_train.shape}  # [samples]")
-print(f"Example X_train[0]:\n", X_train[0].shape, y_train[0])
+print(f"Example X_train[0]:{X_train[0].shape} Y_train[0]: {y_train[0][0]}")
 
 
 # Poisson encoding for SNN input
-def poisson_encode(batch_context_embeddings, n_steps):
+def poisson_encode(batch_context_embeddings, n_steps, input_mode='spatial'):
     """
     batch_context_embeddings: [B, context_n, emb_dim]
-    returns: [T, B, context_n * emb_dim]
+        returns:
+            spatial: [T, B, context_n * emb_dim]
+            temporal: [T * context_n, B, emb_dim]
     """
     # Convert signed embeddings to [0, 1] probabilities for rate coding.
     max_abs = batch_context_embeddings.abs().amax(dim=(1, 2), keepdim=True).clamp_min(1e-8)
@@ -122,22 +142,40 @@ def poisson_encode(batch_context_embeddings, n_steps):
     pad_mask = batch_context_embeddings.abs().sum(dim=2, keepdim=True).eq(0)
     spike_prob = spike_prob.masked_fill(pad_mask, 0.0)
 
-    # Follow snnTorch docs: data shape [batch x input_size].
     B, context_n, emb_dim = spike_prob.shape
-    spike_prob_flat = spike_prob.reshape(B, context_n * emb_dim)
+    if input_mode == 'spatial':
+        # Follow snnTorch docs: data shape [batch x input_size].
+        spike_prob_flat = spike_prob.reshape(B, context_n * emb_dim)
 
-    spikes = spikegen.rate(
-        spike_prob_flat,
-        num_steps=n_steps,
-        gain=1,
-        offset=0,
-        first_spike_time=0,
-        time_var_input=False,
-    )
+        spikes = spikegen.rate(
+            spike_prob_flat,
+            num_steps=n_steps,
+            gain=1,
+            offset=0,
+            first_spike_time=0,
+            time_var_input=False,
+        )
 
-    # Return [T, B, context_n * emb_dim]
-    spikes = spikes.reshape(n_steps, B, context_n * emb_dim)
-    return spikes
+        # Return [T, B, context_n * emb_dim]
+        return spikes.reshape(n_steps, B, context_n * emb_dim)
+
+    if input_mode == 'temporal':
+        spike_segments = []
+        for word_index in range(context_n):
+            word_prob = spike_prob[:, word_index, :]
+            word_spikes = spikegen.rate(
+                word_prob,
+                num_steps=n_steps,
+                gain=1,
+                offset=0,
+                first_spike_time=0,
+                time_var_input=False,
+            )
+            spike_segments.append(word_spikes)
+
+        return torch.cat(spike_segments, dim=0)
+
+    raise ValueError("input_mode must be either 'spatial' or 'temporal'")
 
 class ContextSNN(nn.Module):
     """Predict UPOS of last token in context window."""
@@ -166,7 +204,7 @@ class ContextSNN(nn.Module):
         return mem2
 
 
-input_size = args.context_size * embedding_dim
+input_size = args.context_size * embedding_dim if input_mode == 'spatial' else embedding_dim
 net = ContextSNN(input_size, args.num_hidden, num_ud_tags, args.beta)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -180,6 +218,7 @@ optimizer = torch.optim.Adam(net.parameters(), lr=args.learning_rate)
 
 print(f"\nTraining config:")
 print(f"  Device: {device}")
+print(f"  Input mode: {input_mode}")
 print(f"  Context size: {args.context_size}")
 print(f"  Input size: {input_size}")
 print(f"  Hidden size: {args.num_hidden}")
@@ -203,7 +242,7 @@ def evaluate_model(model, features, labels, batch_size, device, n_steps):
             xb = xb.to(device)
             yb = yb.to(device)
 
-            spike_seq = poisson_encode(xb, n_steps).to(device)
+            spike_seq = poisson_encode(xb, n_steps, input_mode=input_mode).to(device)
             logits = model(spike_seq)
             loss = loss_fn(logits, yb)
 
@@ -230,7 +269,7 @@ for epoch in range(args.epochs):
         xb = xb.to(device)                                          # [B, context_n, emb_dim]
         yb = yb.to(device)                                          # [B]
 
-        spike_seq = poisson_encode(xb, args.sim_steps).to(device)        # [T, B, input_size]
+        spike_seq = poisson_encode(xb, args.sim_steps, input_mode=input_mode).to(device)        # [T, B, input_size]
         logits = net(spike_seq)                                     # [B, num_ud_tags]
         loss = loss_fn(logits, yb)
 
@@ -259,7 +298,7 @@ training_metadata = {
     "training_config": {
         "embedding_dim": int(embedding_dim),
         "input_size": input_size,
-        "num_ud_tags": num_ud_tags,
+        "POS_tags": num_ud_tags,
         "num_training_samples": int(X_train.shape[0]),
         "device": str(device),
     } | vars(args),  # include all CLI args in metadata

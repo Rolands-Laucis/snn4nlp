@@ -4,7 +4,7 @@ venv
 input_data/**/*.*
 !input_data/**/.gitkeep
 output_data/**/*.*
-!output_data/**/.gitkeep
+# !output_data/**/.gitkeep
 
 # Created by https://www.toptal.com/developers/gitignore/api/venv,python,visualstudiocode
 # Edit at https://www.toptal.com/developers/gitignore?templates=venv,python,visualstudiocode
