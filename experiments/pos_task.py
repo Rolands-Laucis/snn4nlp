@@ -139,28 +139,6 @@ def poisson_encode(batch_context_embeddings, n_steps):
     spikes = spikes.reshape(n_steps, B, context_n * emb_dim)
     return spikes
 
-# sanity check; Debug once during setup: first input sample, first real token embedding (not left padding) to verify correct encoding and shapes before training
-if False:
-    print("\nSetup debug Poisson spike train (first sample, first word embedding):")
-    poisson_debug_selected_sample = 2
-    setup_debug_word_info = pos_train_data[0][poisson_debug_selected_sample]                        # [lemma, upos, xpos, embed...]
-    setup_debug_word = setup_debug_word_info[0]
-    setup_debug_embedding = torch.tensor(setup_debug_word_info[3:], dtype=torch.float32)
-    print(f"  word: {setup_debug_word}")
-    print(f"  embedding vector shape: {setup_debug_embedding.shape}")
-    print("  embedding vector values:")
-    print(setup_debug_embedding)
-    # exit(0)
-
-    setup_debug_input = X_train[poisson_debug_selected_sample, -1, :].unsqueeze(0).unsqueeze(0)     # [1, 1, emb_dim]
-    setup_debug_spikes = poisson_encode(setup_debug_input, args.sim_steps)    # [T, 1, emb_dim]
-    print(f"  input shape: {setup_debug_input.shape}")
-    print(f"  spike shape: {setup_debug_spikes.shape}")
-    print(f"  mean spike rate: {setup_debug_spikes.float().mean().item():.4f}")
-    print("  values:")
-    print(setup_debug_spikes[:, 0, :])
-    exit(0)
-
 class ContextSNN(nn.Module):
     """Predict UPOS of last token in context window."""
 
