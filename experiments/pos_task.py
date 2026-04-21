@@ -263,8 +263,8 @@ def evaluate_model(model, features, labels, batch_size, device, n_steps):
 
 
 # Train (samples are shuffled by DataLoader each epoch)
-final_loss = None
-final_acc = None
+epoch_losses = []
+epoch_accuracies = []
 net.train()
 for epoch in range(args.epochs):
     running_loss = 0.0
@@ -290,8 +290,8 @@ for epoch in range(args.epochs):
 
     epoch_loss = running_loss / max(1, running_total)
     epoch_acc = running_correct / max(1, running_total)
-    final_loss = epoch_loss
-    final_acc = epoch_acc
+    epoch_losses.append(float(epoch_loss))
+    epoch_accuracies.append(float(epoch_acc))
     print(f"Epoch {epoch + 1}/{args.epochs} | loss: {epoch_loss:.4f} | acc: {epoch_acc:.4f}")
 
 print("Training finished.")
@@ -309,8 +309,8 @@ training_metadata = {
         "device": str(device),
     } | vars(args),  # include all CLI args in metadata
     "results": {
-        "train_loss": float(final_loss) if final_loss is not None else None,
-        "train_accuracy": float(final_acc) if final_acc is not None else None,
+        "epoch_train_loss": epoch_losses,
+        "epoch_train_accuracy": epoch_accuracies,
         "test_loss": float(test_loss),
         "test_accuracy": float(test_acc),
     },
