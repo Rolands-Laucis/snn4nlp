@@ -2,7 +2,7 @@ from tqdm import tqdm
 from pathlib import Path
 import pickle
 
-# https://github.com/UniversalDependencies/UD_English-GUM/tree/master
+# https://github.com/UniversalDependencies/UD_English-EWT
 def ReadConlluFile(path:str, min_sentence_length:int = 4, max_sentence_length:int = 30, limit:int = None):
     sentences = []
     file_path = Path(path)
