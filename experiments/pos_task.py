@@ -17,8 +17,9 @@ CAST_POS_DIR = PROJECT_ROOT / 'input_data' / 'cast_pos'
 parser = argparse.ArgumentParser(description='Train an SNN for POS tagging')
 parser.add_argument('--input_mode', type=str, default='spatial', help='Input mode for the SNN [spatial|temporal] (default: spatial)')
 parser.add_argument('--label_feature', type=str, default='upos', choices=['upos', 'xpos'], help='Target label feature to predict [upos|xpos] (default: upos)')
-parser.add_argument('--limit', type=int, default=100, help='Limit the number of sentences for testing (default: 100)')
+parser.add_argument('--limit', type=int, default=None, help='Limit the number of sentences for testing (default: 100)')
 parser.add_argument('--input_file_prefix', type=str, default='pos_d50', help='Prefix for input files (default: pos)')
+parser.add_argument('--output_file_prefix', type=str, default='', help='Prefix for output files')
 parser.add_argument('--context_size', type=int, default=5, help='N context words; predict POS of the last token in the window (default: 5)')
 parser.add_argument('--num_hidden', type=int, default=64, help='Number of hidden units (default: 64)')
 parser.add_argument('--sim_steps', type=int, default=20, help='Poisson/SNN simulation steps (default: 10)')
@@ -26,7 +27,7 @@ parser.add_argument('--beta', type=float, default=0.95, help='Leaky neuron decay
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training (default: 32)')
 parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs (default: 5)')
 parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning rate (default: 0.001)')
-parser.add_argument('--model_output_dir', type=str, default='output_results/upos/', help='Output directory for saved model checkpoint')
+parser.add_argument('--model_output_dir', type=str, default=PROJECT_ROOT / 'output_results' / 'upos', help='Output directory for saved model checkpoint')
 args = parser.parse_args()
 input_mode = args.input_mode.lower()
 if input_mode not in {'spatial', 'temporal'}:
@@ -316,7 +317,7 @@ print(f"Test evaluation | loss: {test_loss:.4f} | acc: {test_acc:.4f}")
 
 # Save trained model checkpoint for easy reload.
 now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-run_filename_base = "_".join([now, f'e-{args.epochs}', f'ctx-{args.context_size}', str(round(test_acc * 100, 2))])
+run_filename_base = "_".join([args.output_file_prefix or args.label_feature, now, f'e-{args.epochs}', f'ctx-{args.context_size}', str(round(test_acc * 100, 2))])
 model_output_path = Path(args.model_output_dir) / f'{run_filename_base}.pt'
 if not model_output_path.is_absolute():
     model_output_path = PROJECT_ROOT / model_output_path
