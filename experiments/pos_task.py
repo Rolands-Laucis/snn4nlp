@@ -10,11 +10,11 @@ from pathlib import Path
 import json
 from datetime import datetime
 
-parser = argparse.ArgumentParser(description='Train an SNN for UPOS tagging')
+parser = argparse.ArgumentParser(description='Train an SNN for POS tagging')
 parser.add_argument('--input_mode', type=str, default='spatial', help='Input mode for the SNN [spatial|temporal] (default: spatial)')
 parser.add_argument('--limit', type=int, default=100, help='Limit the number of sentences for testing (default: 100)')
 parser.add_argument('--input_file_prefix', type=str, default='pos_d50', help='Prefix for input files (default: pos)')
-parser.add_argument('--context_size', type=int, default=5, help='N context words; predict UPOS of the last token in the window (default: 5)')
+parser.add_argument('--context_size', type=int, default=5, help='N context words; predict POS of the last token in the window (default: 5)')
 parser.add_argument('--num_hidden', type=int, default=64, help='Number of hidden units (default: 64)')
 parser.add_argument('--sim_steps', type=int, default=20, help='Poisson/SNN simulation steps (default: 10)')
 parser.add_argument('--beta', type=float, default=0.95, help='Leaky neuron decay factor (default: 0.95)')
@@ -29,16 +29,16 @@ if input_mode not in {'spatial', 'temporal'}:
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAST_POS_DIR = PROJECT_ROOT / 'input_data' / 'cast_pos'
 
-pos_train_data, embedding_dim = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_train.tsv', limit=args.limit)
-pos_dev_data, _ = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_dev.tsv', limit=args.limit)
-pos_test_data, _ = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_test.tsv', limit=args.limit)
+pos_train_data, embedding_dim = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_train.pkl', limit=args.limit)
+pos_dev_data, _ = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_dev.pkl', limit=args.limit)
+pos_test_data, _ = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_test.pkl', limit=args.limit)
 
 pos_train_data += pos_dev_data  # combine train and dev for training
 
 if not embedding_dim and pos_train_data and pos_train_data[0] and len(pos_train_data[0][0]) > 3:
     embedding_dim = len(pos_train_data[0][0][3:])
 
-# Build UPOS tag vocabulary from training data
+# Build POS tag vocabulary from training data
 upos_tags = set()
 for sentence in pos_train_data + pos_test_data:
     for word_info in sentence:
@@ -48,15 +48,15 @@ upos_to_idx = {tag: idx for idx, tag in enumerate(sorted(upos_tags))}
 idx_to_upos = {idx: tag for tag, idx in upos_to_idx.items()}
 num_ud_tags = len(upos_to_idx)
 
-print(f"UPOS tags ({num_ud_tags}): {upos_tags}")
+print(f"Label tags ({num_ud_tags}): {upos_tags}")
 
 def build_rolling_context_samples(sentences, upos_map, context_n, embedding_dim, skip_unknown_labels=False):
     """
-    Build (X, y) where each sample predicts the UPOS of the last token in a context window.
+    Build (X, y) where each sample predicts the POS of the last token in a context window.
 
     For each sentence and token position t:
       - Input: embeddings [t-context_n+1 ... t], with left overhang padded by zero vector
-      - Target: UPOS at position t
+      - Target: POS at position t
       
     Each word_info is [lemma, upos, xpos, embed1, embed2, ...]
     """
@@ -88,7 +88,7 @@ def build_rolling_context_samples(sentences, upos_map, context_n, embedding_dim,
                 if skip_unknown_labels:
                     skipped_samples += 1
                     continue
-                raise KeyError(f"Unknown UPOS tag '{upos}' not found in training vocabulary")
+                raise KeyError(f"Unknown POS tag '{upos}' not found in training vocabulary")
 
             x_list.append(torch.stack(ctx_embeddings, dim=0))       # [context_n, embedding_dim]
             y_list.append(upos_map[upos])                           # scalar class index (upos at index 1)
@@ -99,7 +99,7 @@ def build_rolling_context_samples(sentences, upos_map, context_n, embedding_dim,
     X = torch.stack(x_list, dim=0)                                  # [num_samples, context_n, embedding_dim]
     y = torch.tensor(y_list, dtype=torch.long)                      # [num_samples]
     if skip_unknown_labels and skipped_samples:
-        print(f"Skipped {skipped_samples} samples with unknown UPOS labels during sample creation.")
+        print(f"Skipped {skipped_samples} samples with unknown POS labels during sample creation.")
     return X, y
 
 
@@ -122,8 +122,7 @@ X_test, y_test = build_rolling_context_samples(
 print(f"Training samples: {X_train.shape[0]}")
 print(f"X_train shape: {X_train.shape}  # [samples, context, embed_dim]")
 print(f"y_train shape: {y_train.shape}  # [samples]")
-print(f"Example X_train[0]:{X_train[0].shape} Y_train[0]: {y_train[0][0]}")
-
+print(f"Example X_train[0]:{X_train[0].shape} Y_train[0]: {y_train[0]}")
 
 # Poisson encoding for SNN input
 def poisson_encode(batch_context_embeddings, n_steps, input_mode='spatial'):
@@ -178,7 +177,7 @@ def poisson_encode(batch_context_embeddings, n_steps, input_mode='spatial'):
     raise ValueError("input_mode must be either 'spatial' or 'temporal'")
 
 class ContextSNN(nn.Module):
-    """Predict UPOS of last token in context window."""
+    """Predict POS of last token in context window."""
 
     def __init__(self, input_size, hidden_size, output_size, beta_val):
         super().__init__()
@@ -190,18 +189,25 @@ class ContextSNN(nn.Module):
     def forward(self, spike_seq):
         """
         spike_seq: [T, B, input_size]
-        Returns final-step output membrane potential [B, output_size].
+        Returns output spike counts over all timesteps [B, output_size].
         """
         mem1 = self.lif1.init_leaky()
         mem2 = self.lif2.init_leaky()
+        spk2_sum = torch.zeros(
+            spike_seq.shape[1],
+            self.fc2.out_features,
+            device=spike_seq.device,
+            dtype=spike_seq.dtype,
+        )
 
         for step in range(spike_seq.shape[0]):
             cur1 = self.fc1(spike_seq[step])
             spk1, mem1 = self.lif1(cur1, mem1)
             cur2 = self.fc2(spk1)
             spk2, mem2 = self.lif2(cur2, mem2)
+            spk2_sum += spk2
 
-        return mem2
+        return spk2_sum
 
 
 input_size = args.context_size * embedding_dim if input_mode == 'spatial' else embedding_dim
@@ -243,11 +249,11 @@ def evaluate_model(model, features, labels, batch_size, device, n_steps):
             yb = yb.to(device)
 
             spike_seq = poisson_encode(xb, n_steps, input_mode=input_mode).to(device)
-            logits = model(spike_seq)
-            loss = loss_fn(logits, yb)
+            spike_counts = model(spike_seq)
+            loss = loss_fn(spike_counts, yb)
 
             running_loss += loss.item() * xb.size(0)
-            preds = torch.argmax(logits, dim=1)
+            preds = torch.argmax(spike_counts, dim=1)
             running_correct += (preds == yb).sum().item()
             running_total += xb.size(0)
 
@@ -270,15 +276,15 @@ for epoch in range(args.epochs):
         yb = yb.to(device)                                          # [B]
 
         spike_seq = poisson_encode(xb, args.sim_steps, input_mode=input_mode).to(device)        # [T, B, input_size]
-        logits = net(spike_seq)                                     # [B, num_ud_tags]
-        loss = loss_fn(logits, yb)
+        spike_counts = net(spike_seq)                               # [B, num_ud_tags]
+        loss = loss_fn(spike_counts, yb)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         running_loss += loss.item() * xb.size(0)
-        preds = torch.argmax(logits, dim=1)
+        preds = torch.argmax(spike_counts, dim=1)
         running_correct += (preds == yb).sum().item()
         running_total += xb.size(0)
 

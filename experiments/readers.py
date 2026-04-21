@@ -21,8 +21,8 @@ def ReadConlluFile(path:str, min_sentence_length:int = 4, max_sentence_length:in
                         if len(words) >= min_sentence_length and len(words) <= max_sentence_length:
                             sentences.append(words)
                         words = []
-                    annots = line.split('\t')[2:5]
-                    words.append(annots)
+                    annots = line.split('\t')
+                    words.append([annots[0].lower()] + annots[3:5]) #NOTE lowercase the word to better match the embeddings, and only keep the word and UPOS tag
                     prev_num = current_num
                 except (ValueError, IndexError):
                     pass
@@ -50,8 +50,8 @@ def ReadIOB2File(path:str, min_sentence_length:int = 4, max_sentence_length:int 
                         if len(words) >= min_sentence_length and len(words) <= max_sentence_length:
                             sentences.append(words)
                         words = []
-                    annots = line.split('\t')[1:2]
-                    words.append(annots)
+                    annots = line.split('\t')
+                    words.append([annots[0].lower(), annots[1]]) #NOTE lowercase the word to better match the embeddings
                     prev_num = current_num
                 except (ValueError, IndexError):
                     pass
@@ -71,7 +71,7 @@ def ReadRawEmbeddingsFile(path:str, limit:int = None):
             embeddings[word] = vector
             if limit and len(embeddings) >= limit:
                 break
-    return embeddings, embeddings.keys(), len(embeddings['the'])
+    return embeddings, len(embeddings.keys()), len(embeddings['the'])
 
 def ReadPickledEmbeddingsFile(path:str, limit:int = None):
     file_path = Path(path)
@@ -98,7 +98,7 @@ def ReadPickledEmbeddingsFile(path:str, limit:int = None):
     else:
         embedding_dim = 0
 
-    return embeddings, embeddings.keys(), embedding_dim
+    return embeddings, len(embeddings.keys()), embedding_dim
 
 def ReadUPOSInputFile(path:str, limit:int = None):
     file_path = Path(path)
@@ -110,6 +110,20 @@ def ReadUPOSInputFile(path:str, limit:int = None):
     
     if sentences and sentences[0] and len(sentences[0][0]) > 3:
         embedding_dim = len(sentences[0][0][3:])
+    else:
+        embedding_dim = 0
+    return sentences, embedding_dim
+
+def ReadNERInputFile(path:str, limit:int = None):
+    file_path = Path(path)
+    with file_path.open('rb') as f:
+        sentences = pickle.load(f)
+
+    if limit is not None:
+        sentences = sentences[:limit]
+    
+    if sentences and sentences[0] and len(sentences[0][0]) > 2:
+        embedding_dim = len(sentences[0][0][2:])
     else:
         embedding_dim = 0
     return sentences, embedding_dim
