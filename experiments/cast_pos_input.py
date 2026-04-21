@@ -10,7 +10,7 @@ UD_DIR = INPUT_DATA_DIR / 'ud_gum'
 
 parser = argparse.ArgumentParser(description='Train an SNN for UPOS tagging')
 parser.add_argument('--limit', type=int, default=100, help='Limit the number of sentences for testing (default: 100)')
-parser.add_argument('--embeddings_path', type=str, default=INPUT_DATA_DIR / 'word_embeddings' / 'glove' / 'wiki_giga_2024_50_MFT20_vectors_seed_123_alpha_0.75_eta_0.075_combined.txt', help='Path to the embeddings file')
+parser.add_argument('--embeddings_path', type=str, default=INPUT_DATA_DIR / 'word_embeddings' / 'glove' / 'glove_50d.pkl', help='Path to the embeddings file')
 parser.add_argument('--out_folder', type=str, default=INPUT_DATA_DIR / 'cast_pos', help='Path to save the cast embeddings')
 args = parser.parse_args()
 
