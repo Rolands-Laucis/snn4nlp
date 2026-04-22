@@ -27,6 +27,7 @@ parser.add_argument('--beta', type=float, default=0.95, help='Leaky neuron decay
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training (default: 32)')
 parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs (default: 5)')
 parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning rate (default: 0.001)')
+parser.add_argument('--save', type=bool, default=False, help='Whether to save the model checkpoint')
 parser.add_argument('--model_output_dir', type=str, default=PROJECT_ROOT / 'output_results' / 'upos', help='Output directory for saved model checkpoint')
 args = parser.parse_args()
 input_mode = args.input_mode.lower()
@@ -318,39 +319,40 @@ print(f"Test evaluation | loss: {test_loss:.4f} | acc: {test_acc:.4f}")
 # Save trained model checkpoint for easy reload.
 now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 run_filename_base = "_".join([args.output_file_prefix or args.label_feature, now, f'e-{args.epochs}', f'ctx-{args.context_size}', str(round(test_acc * 100, 2))])
-model_output_path = Path(args.model_output_dir) / f'{run_filename_base}.pt'
-if not model_output_path.is_absolute():
-    model_output_path = PROJECT_ROOT / model_output_path
-model_output_path.parent.mkdir(parents=True, exist_ok=True)
+if args.save:
+    model_output_path = Path(args.model_output_dir) / f'{run_filename_base}.pt'
+    if not model_output_path.is_absolute():
+        model_output_path = PROJECT_ROOT / model_output_path
+    model_output_path.parent.mkdir(parents=True, exist_ok=True)
 
-checkpoint = {
-    "model_state_dict": net.state_dict(),
-    "model_class": "ContextSNN",
-    "model_config": {
-        "input_size": input_size,
-        "hidden_size": args.num_hidden,
-        "output_size": num_labels,
-        "beta": args.beta,
-        "input_mode": input_mode,
-        "label_feature": label_feature,
-        "context_size": args.context_size,
-        "embedding_dim": int(embedding_dim),
-        "sim_steps": args.sim_steps,
-    },
-    "label_maps": {
-        "label_to_idx": label_to_idx,
-        "idx_to_label": idx_to_label,
-    },
-    "metrics": {
-        "epoch_train_loss": epoch_losses,
-        "epoch_train_accuracy": epoch_accuracies,
-        "test_loss": float(test_loss),
-        "test_accuracy": float(test_acc),
-    },
-    "cli_args": vars(args),
-}
-torch.save(checkpoint, model_output_path)
-print(f"Model checkpoint saved to {model_output_path}")
+    checkpoint = {
+        "model_state_dict": net.state_dict(),
+        "model_class": "ContextSNN",
+        "model_config": {
+            "input_size": input_size,
+            "hidden_size": args.num_hidden,
+            "output_size": num_labels,
+            "beta": args.beta,
+            "input_mode": input_mode,
+            "label_feature": label_feature,
+            "context_size": args.context_size,
+            "embedding_dim": int(embedding_dim),
+            "sim_steps": args.sim_steps,
+        },
+        "label_maps": {
+            "label_to_idx": label_to_idx,
+            "idx_to_label": idx_to_label,
+        },
+        "metrics": {
+            "epoch_train_loss": epoch_losses,
+            "epoch_train_accuracy": epoch_accuracies,
+            "test_loss": float(test_loss),
+            "test_accuracy": float(test_acc),
+        },
+        "cli_args": vars(args),
+    }
+    torch.save(checkpoint, model_output_path)
+    print(f"Model checkpoint saved to {model_output_path}")
 
 # Export training metadata and results to JSON
 training_metadata = {
