@@ -4,6 +4,7 @@ from snntorch import utils
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+from QLIF import QLIF
 
 from readers import ReadUPOSInputFile
 import argparse
@@ -25,6 +26,8 @@ parser.add_argument('--num_hidden', type=int, default=64, help='Number of hidden
 parser.add_argument('--sim_steps', type=int, default=20, help='Poisson/SNN simulation steps')
 parser.add_argument('--encoding_method', type=str, default='poisson', choices=['poisson', 'latency'], help='Spike encoding method [poisson|latency]')
 parser.add_argument('--decoding_method', type=str, default='spike_count', choices=['spike_count', 'ttfs'], help='Output decoding method [spike_count|ttfs]')
+parser.add_argument('--neuron_model', type=str, default='lif', choices=['lif', 'rleaky', 'synaptic', 'rsynaptic', 'lapicque', 'alpha', 'qlif'], help='Neuron model to use [lif|rleaky|synaptic|rsynaptic|lapicque|alpha|qlif]')
+parser.add_argument('--alpha', type=float, default=None, help='Synaptic decay factor for second-order neurons; defaults to beta when omitted')
 parser.add_argument('--beta', type=float, default=0.95, help='Leaky neuron decay factor')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
 parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs')
@@ -37,6 +40,8 @@ if input_mode not in {'spatial', 'temporal'}:
     raise ValueError("--input_mode must be either 'spatial' or 'temporal'")
 encoding_method = args.encoding_method.lower()
 decoding_method = args.decoding_method.lower()
+neuron_model = args.neuron_model.lower()
+alpha = args.alpha if args.alpha is not None else args.beta
 label_feature = args.label_feature.lower()
 label_feature_to_index = {'upos': 1, 'xpos': 2}
 label_index = label_feature_to_index[label_feature]
@@ -204,15 +209,39 @@ def spike_encode(batch_context_embeddings, n_steps, input_mode='spatial', encodi
 
     raise ValueError("input_mode must be either 'spatial' or 'temporal'")
 
+
+def build_neuron_layer(model_name, beta_value, layer_size):
+    model_name = model_name.lower()
+    if model_name == 'lif':
+        return snn.Leaky(beta=beta_value, init_hidden=True)
+    if model_name == 'rleaky':
+        return snn.RLeaky(beta=beta_value, linear_features=layer_size, init_hidden=True)
+    if model_name == 'synaptic':
+        return snn.Synaptic(alpha=alpha, beta=beta_value, init_hidden=True)
+    if model_name == 'rsynaptic':
+        return snn.RSynaptic(alpha=alpha, beta=beta_value, linear_features=layer_size, init_hidden=True)
+    if model_name == 'lapicque':
+        return snn.Lapicque(beta=beta_value, init_hidden=True)
+    if model_name == 'alpha':
+        return snn.Alpha(alpha=alpha, beta=beta_value, init_hidden=True)
+    if model_name == 'qlif':
+        return QLIF(alpha=alpha, beta=beta_value, init_hidden=True)
+    raise ValueError("--neuron_model must be one of: lif, rleaky, synaptic, rsynaptic, lapicque, alpha, qlif")
+
+
+def reset_model_state(model):
+    utils.reset(model)
+
+
 class ContextSNN(nn.Module):
     """Predict POS of last token in context window."""
 
-    def __init__(self, input_size, hidden_size, output_size, beta_val):
+    def __init__(self, input_size, hidden_size, output_size, beta_val, neuron_model_name):
         super().__init__()
         self.fc1 = nn.Linear(input_size, hidden_size)
-        self.lif1 = snn.Leaky(beta=beta_val, init_hidden=True)
+        self.lif1 = build_neuron_layer(neuron_model_name, beta_value=beta_val, layer_size=hidden_size)
         self.fc2 = nn.Linear(hidden_size, output_size)
-        self.lif2 = snn.Leaky(beta=beta_val, init_hidden=True)
+        self.lif2 = build_neuron_layer(neuron_model_name, beta_value=beta_val, layer_size=output_size)
 
     def forward(self, spike_seq, track_ttfs=False):
         """
@@ -304,7 +333,7 @@ def decode_predictions(spike_counts, decoding_method='spike_count', first_spike_
 
 
 input_size = args.context_size * embedding_dim if input_mode == 'spatial' else embedding_dim
-net = ContextSNN(input_size, args.num_hidden, num_labels, args.beta)
+net = ContextSNN(input_size, args.num_hidden, num_labels, args.beta, neuron_model)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 net = net.to(device)
@@ -320,6 +349,8 @@ print(f"  Device: {device}")
 print(f"  Input mode: {input_mode}")
 print(f"  Encoding method: {encoding_method}")
 print(f"  Decoding method: {decoding_method}")
+print(f"  Neuron model: {neuron_model}")
+print(f"  Alpha: {alpha}")
 print(f"  Context size: {args.context_size}")
 print(f"  Input size: {input_size}")
 print(f"  Hidden size: {args.num_hidden}")
@@ -341,7 +372,7 @@ def evaluate_model(model, features, labels, batch_size, device, n_steps):
 
     with torch.no_grad():
         for xb, yb in eval_loader:
-            utils.reset(model)
+            reset_model_state(model)
             xb = xb.to(device)
             yb = yb.to(device)
 
@@ -382,7 +413,7 @@ epoch_losses = []
 epoch_accuracies = []
 epoch_ttfs_fallback_rates = []
 net.train()
-utils.reset(net)
+reset_model_state(net)
 for epoch in range(args.epochs):
     running_loss = 0.0
     running_correct = 0
@@ -390,7 +421,7 @@ for epoch in range(args.epochs):
     running_fallback = 0
 
     for xb, yb in train_loader:
-        utils.reset(net)
+        reset_model_state(net)
         xb = xb.to(device)                                          # [B, context_n, emb_dim]
         yb = yb.to(device)                                          # [B]
 
@@ -422,7 +453,7 @@ for epoch in range(args.epochs):
         running_total += xb.size(0)
         running_fallback += fallback_count
 
-        utils.reset(net)
+        reset_model_state(net)
 
     epoch_loss = running_loss / max(1, running_total)
     epoch_acc = running_correct / max(1, running_total)
@@ -459,9 +490,11 @@ if args.save:
             "hidden_size": args.num_hidden,
             "output_size": num_labels,
             "beta": args.beta,
+            "alpha": alpha,
             "input_mode": input_mode,
             "encoding_method": encoding_method,
             "decoding_method": decoding_method,
+            "neuron_model": neuron_model,
             "label_feature": label_feature,
             "context_size": args.context_size,
             "embedding_dim": int(embedding_dim),
