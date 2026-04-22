@@ -11,8 +11,8 @@ NER_DIR = INPUT_DATA_DIR / 'ner'
 
 parser = argparse.ArgumentParser(description='Train an SNN for NER tagging')
 parser.add_argument('--limit', type=int, default=None, help='Limit the number of sentences for testing (default: 100)')
-parser.add_argument('--min_sentence_length', type=int, default=4, help='Minimum sentence length (default: 4)')
-parser.add_argument('--max_sentence_length', type=int, default=30, help='Maximum sentence length (default: 30)')
+parser.add_argument('--min_sentence_length', type=int, default=5, help='Minimum sentence length (default: 5)')
+parser.add_argument('--max_sentence_length', type=int, default=40, help='Maximum sentence length (default: 40)')
 parser.add_argument('--embeddings_path', type=str, default=INPUT_DATA_DIR / 'word_embeddings' / 'glove' / 'glove_50d.pkl', help='Path to the embeddings file')
 parser.add_argument('--out_folder', type=str, default=INPUT_DATA_DIR / 'cast_ner', help='Path to save the cast embeddings')
 args = parser.parse_args()

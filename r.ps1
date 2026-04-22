@@ -2,7 +2,7 @@
 
 python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.50d.txt" --out_path="input_data\word_embeddings\glove\glove_50d.pkl"
 
-# python experiments/cast_pos_input.py
+# python experiments/cast_pos_input.py --min_sentence_length 5 --max_sentence_length 40
 # python experiments/cast_ner_input.py
 
 # python experiments/pos_task.py --limit 100 --input_mode "spatial" --epochs 10
