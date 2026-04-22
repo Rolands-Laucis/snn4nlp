@@ -19,3 +19,11 @@ for beta in 0.5 0.75 0.9 0.95 0.99; do
 done
 
 # the best found were sim_steps=20 and beta=0.95
+
+# phase 1
+# E1-A
+python experiments/E0.py --input_mode "temporal" --epochs 20 --beta 0.95 --sim_steps 20 --encoding_method "poisson" --output_file_prefix "pois_sc" --batch_size 16
+# E1-B
+python experiments/E1.py --input_mode "temporal" --epochs 20 --beta 0.95 --sim_steps 20 --encoding_method "latency" --output_file_prefix "lat_ttfs" --batch_size 16
+# E1-C
+# python experiments/E1.py --input_mode "temporal" --epochs 20 --beta 0.95 --sim_steps 20 --encoding_method "direct" --output_file_prefix "dir_sc" --batch_size 16

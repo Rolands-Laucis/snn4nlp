@@ -23,16 +23,18 @@ parser.add_argument('--output_file_prefix', type=str, default='', help='Prefix f
 parser.add_argument('--context_size', type=int, default=5, help='N context words; predict POS of the last token in the window')
 parser.add_argument('--num_hidden', type=int, default=64, help='Number of hidden units')
 parser.add_argument('--sim_steps', type=int, default=20, help='Poisson/SNN simulation steps')
+parser.add_argument('--encoding_method', type=str, default='poisson', choices=['poisson', 'latency'], help='Spike encoding method [poisson|latency]')
 parser.add_argument('--beta', type=float, default=0.95, help='Leaky neuron decay factor')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
 parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs')
 parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning rate')
 parser.add_argument('--save', type=bool, default=False, help='Whether to save the model checkpoint')
-parser.add_argument('--model_output_dir', type=str, default=PROJECT_ROOT / 'output_results' / 'E0', help='Output directory for saved model checkpoint')
+parser.add_argument('--output_dir', type=str, default=PROJECT_ROOT / 'output_results' / 'E1', help='Output directory for saved model checkpoint')
 args = parser.parse_args()
 input_mode = args.input_mode.lower()
 if input_mode not in {'spatial', 'temporal'}:
     raise ValueError("--input_mode must be either 'spatial' or 'temporal'")
+encoding_method = args.encoding_method.lower()
 label_feature = args.label_feature.lower()
 label_feature_to_index = {'upos': 1, 'xpos': 2}
 label_index = label_feature_to_index[label_feature]
@@ -136,8 +138,8 @@ print(f"X_train shape: {X_train.shape}  # [samples, context, embed_dim]")
 print(f"y_train shape: {y_train.shape}  # [samples]")
 print(f"Example X_train[0]:{X_train[0].shape} Y_train[0]: {y_train[0]}")
 
-# Poisson encoding for SNN input
-def poisson_encode(batch_context_embeddings, n_steps, input_mode='spatial'):
+# Spike encoding for SNN input
+def spike_encode(batch_context_embeddings, n_steps, input_mode='spatial', encoding_method='poisson'):
     """
     batch_context_embeddings: [B, context_n, emb_dim]
         returns:
@@ -154,18 +156,37 @@ def poisson_encode(batch_context_embeddings, n_steps, input_mode='spatial'):
     spike_prob = spike_prob.masked_fill(pad_mask, 0.0)
 
     B, context_n, emb_dim = spike_prob.shape
+
+    def encode_features(prob_tensor):
+        if encoding_method == 'poisson':
+            return spikegen.rate(
+                prob_tensor,
+                num_steps=n_steps,
+                gain=1,
+                offset=0,
+                first_spike_time=0,
+                time_var_input=False,
+            )
+
+        if encoding_method == 'latency':
+            return spikegen.latency(
+                prob_tensor,
+                num_steps=n_steps,
+                threshold=0.01,
+                tau=1,
+                first_spike_time=0,
+                clip=True,
+                normalize=True,
+                linear=True,
+            )
+
+        raise ValueError("encoding_method must be either 'poisson' or 'latency'")
+
     if input_mode == 'spatial':
         # Follow snnTorch docs: data shape [batch x input_size].
         spike_prob_flat = spike_prob.reshape(B, context_n * emb_dim)
 
-        spikes = spikegen.rate(
-            spike_prob_flat,
-            num_steps=n_steps,
-            gain=1,
-            offset=0,
-            first_spike_time=0,
-            time_var_input=False,
-        )
+        spikes = encode_features(spike_prob_flat)
 
         # Return [T, B, context_n * emb_dim]
         return spikes.reshape(n_steps, B, context_n * emb_dim)
@@ -174,14 +195,7 @@ def poisson_encode(batch_context_embeddings, n_steps, input_mode='spatial'):
         spike_segments = []
         for word_index in range(context_n):
             word_prob = spike_prob[:, word_index, :]
-            word_spikes = spikegen.rate(
-                word_prob,
-                num_steps=n_steps,
-                gain=1,
-                offset=0,
-                first_spike_time=0,
-                time_var_input=False,
-            )
+            word_spikes = encode_features(word_prob)
             spike_segments.append(word_spikes)
 
         return torch.cat(spike_segments, dim=0)
@@ -235,6 +249,7 @@ optimizer = torch.optim.Adam(net.parameters(), lr=args.learning_rate)
 print(f"\nTraining config:")
 print(f"  Device: {device}")
 print(f"  Input mode: {input_mode}")
+print(f"  Encoding method: {encoding_method}")
 print(f"  Context size: {args.context_size}")
 print(f"  Input size: {input_size}")
 print(f"  Hidden size: {args.num_hidden}")
@@ -259,7 +274,7 @@ def evaluate_model(model, features, labels, batch_size, device, n_steps):
             xb = xb.to(device)
             yb = yb.to(device)
 
-            spike_seq = poisson_encode(xb, n_steps, input_mode=input_mode).to(device)
+            spike_seq = spike_encode(xb, n_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
             spike_counts = model(spike_seq)
             loss = loss_fn(spike_counts, yb)
 
@@ -290,7 +305,7 @@ for epoch in range(args.epochs):
         xb = xb.to(device)                                          # [B, context_n, emb_dim]
         yb = yb.to(device)                                          # [B]
 
-        spike_seq = poisson_encode(xb, args.sim_steps, input_mode=input_mode).to(device)        # [T, B, input_size]
+        spike_seq = spike_encode(xb, args.sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)        # [T, B, input_size]
         spike_counts = net(spike_seq)                               # [B, num_labels]
         loss = loss_fn(spike_counts, yb)
 
@@ -317,7 +332,7 @@ test_loss, test_acc = evaluate_model(net, X_test, y_test, args.batch_size, devic
 print(f"Test evaluation | loss: {test_loss:.4f} | acc: {test_acc:.4f}")
 
 # Save trained model checkpoint for easy reload.
-output_dir = Path(args.model_output_dir) or PROJECT_ROOT / 'output_results' / 'E0'
+output_dir = Path(args.output_dir) or PROJECT_ROOT / 'output_results' / 'E1'
 output_dir.mkdir(parents=True, exist_ok=True)
 
 now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -334,6 +349,7 @@ if args.save:
             "output_size": num_labels,
             "beta": args.beta,
             "input_mode": input_mode,
+            "encoding_method": encoding_method,
             "label_feature": label_feature,
             "context_size": args.context_size,
             "embedding_dim": int(embedding_dim),
@@ -355,7 +371,7 @@ if args.save:
     print(f"Model checkpoint saved to {model_output_path}")
 
 # Export training metadata and results to JSON
-# del args['model_output_dir']
+# del args['output_dir']
 training_metadata = {
     "training_config": {
         "date":now,
