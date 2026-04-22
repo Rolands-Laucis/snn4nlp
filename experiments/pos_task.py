@@ -355,6 +355,7 @@ if args.save:
     print(f"Model checkpoint saved to {model_output_path}")
 
 # Export training metadata and results to JSON
+# del args['model_output_dir']
 training_metadata = {
     "training_config": {
         "date":now,
@@ -364,7 +365,7 @@ training_metadata = {
         "num_labels": num_labels,
         "num_training_samples": int(X_train.shape[0]),
         "device": str(device),
-    } | vars(args),  # include all CLI args in metadata
+    } | {k: str(v) for k, v in vars(args).items()},  # include all CLI args in metadata #{k: str(v) for k, v in vars(args).items()}
     "results": {
         "epoch_train_loss": epoch_losses,
         "epoch_train_accuracy": epoch_accuracies,
