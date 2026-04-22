@@ -1,4 +1,4 @@
-from readers import ReadIOB2File, ReadPickledEmbeddingsFile
+from readers import ReadIOB2File, ReadPickledEmbeddingsFile, GetEmbeddingUnkVector
 from pathlib import Path
 from tqdm import tqdm
 import argparse
@@ -39,13 +39,7 @@ print(len(NER_train), len(NER_dev), len(NER_test))
 embeddings, embd_count, embedding_dim = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
 print('Embeddings:', embd_count, 'Dimension:', embedding_dim)
 
-def get_unk_vector(embeddings, dim):
-    """Pick an UNK vector from GloVe if available, else return zero vector."""
-    for k in ["<UNK>", "<unk>", "unk", "[UNK]"]:
-        if k in embeddings:
-            return embeddings[k]
-    return [0.0] * dim
-unk_vector = get_unk_vector(embeddings, embedding_dim)
+unk_vector = GetEmbeddingUnkVector(embeddings, embedding_dim)
 
 # cast and save the input for NER tagging
 OUT_DIR.mkdir(parents=True, exist_ok=True)

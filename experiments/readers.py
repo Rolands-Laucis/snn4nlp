@@ -127,3 +127,10 @@ def ReadNERInputFile(path:str, limit:int = None):
     else:
         embedding_dim = 0
     return sentences, embedding_dim
+
+def GetEmbeddingUnkVector(embeddings, dim):
+    """Pick an UNK vector from GloVe if available, else return zero vector."""
+    for k in ["<UNK>", "<unk>", "<unknown>", "[UNK]"]:
+        if k in embeddings:
+            return embeddings[k]
+    return [0.0] * dim

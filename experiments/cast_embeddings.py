@@ -2,6 +2,7 @@ from readers import ReadRawEmbeddingsFile
 import pickle
 from pathlib import Path
 import argparse
+import os
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 INPUT_DATA_DIR = PROJECT_ROOT / 'input_data'
@@ -16,11 +17,16 @@ assert args.embeddings_path is not None, '--embeddings_path is required'
 assert args.out_path is not None, '--out_path is required'
 
 EMBEDDINGS_PATH = args.embeddings_path
-assert EMBEDDINGS_PATH.exists(), f"Embeddings file not found at {EMBEDDINGS_PATH}"
+assert os.path.exists(EMBEDDINGS_PATH), f"Embeddings file not found at {EMBEDDINGS_PATH}"
+
+print(f"Reading embeddings from {EMBEDDINGS_PATH} with limit={args.limit}...")
 
 embeddings, _, dim = ReadRawEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
+print(f"Read {len(embeddings)} embeddings with dimension {dim}")
 
 output_path = Path(args.out_path)
 output_path.parent.mkdir(parents=True, exist_ok=True)
 with output_path.open('wb') as f:
 	pickle.dump((embeddings, dim), f, protocol=pickle.HIGHEST_PROTOCOL)
+
+print(f"Saved cast embeddings to {output_path}")
