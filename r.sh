@@ -22,8 +22,24 @@ done
 
 # phase 1
 # E1-A
-python experiments/E0.py --input_mode "temporal" --epochs 20 --beta 0.95 --sim_steps 20 --encoding_method "poisson" --output_file_prefix "pois_sc" --batch_size 16
+python experiments/E0.py 
+    / --input_mode "temporal" 
+    / --epochs 20 
+    / --beta 0.95 
+    / --sim_steps 20 
+    / --batch_size 16
+    / --encoding_method "poisson" 
+    / --decoding_method "spike_count" 
+    / --output_file_prefix "pois_sc" 
 # E1-B
-python experiments/E1.py --input_mode "temporal" --epochs 20 --beta 0.95 --sim_steps 20 --encoding_method "latency" --output_file_prefix "lat_ttfs" --batch_size 16
+python experiments/E1.py
+    / --input_mode "temporal" 
+    / --epochs 20 
+    / --beta 0.95 
+    / --sim_steps 20 
+    / --batch_size 16
+    / --encoding_method "latency" 
+    / --decoding_method "ttfs" 
+    / --output_file_prefix "lat_ttfs" 
 # E1-C
-# python experiments/E1.py --input_mode "temporal" --epochs 20 --beta 0.95 --sim_steps 20 --encoding_method "direct" --output_file_prefix "dir_sc" --batch_size 16
+# python experiments/E1.py --input_mode "temporal" --epochs 20 --beta 0.95 --sim_steps 20 --encoding_method "direct" --decoding_method "spike_count" --output_file_prefix "dir_sc" --batch_size 16

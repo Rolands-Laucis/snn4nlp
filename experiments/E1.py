@@ -24,6 +24,7 @@ parser.add_argument('--context_size', type=int, default=5, help='N context words
 parser.add_argument('--num_hidden', type=int, default=64, help='Number of hidden units')
 parser.add_argument('--sim_steps', type=int, default=20, help='Poisson/SNN simulation steps')
 parser.add_argument('--encoding_method', type=str, default='poisson', choices=['poisson', 'latency'], help='Spike encoding method [poisson|latency]')
+parser.add_argument('--decoding_method', type=str, default='spike_count', choices=['spike_count', 'ttfs'], help='Output decoding method [spike_count|ttfs]')
 parser.add_argument('--beta', type=float, default=0.95, help='Leaky neuron decay factor')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
 parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs')
@@ -35,6 +36,7 @@ input_mode = args.input_mode.lower()
 if input_mode not in {'spatial', 'temporal'}:
     raise ValueError("--input_mode must be either 'spatial' or 'temporal'")
 encoding_method = args.encoding_method.lower()
+decoding_method = args.decoding_method.lower()
 label_feature = args.label_feature.lower()
 label_feature_to_index = {'upos': 1, 'xpos': 2}
 label_index = label_feature_to_index[label_feature]
@@ -212,14 +214,43 @@ class ContextSNN(nn.Module):
         self.fc2 = nn.Linear(hidden_size, output_size)
         self.lif2 = snn.Leaky(beta=beta_val, init_hidden=True)
 
-    def forward(self, spike_seq):
+    def forward(self, spike_seq, track_ttfs=False):
         """
         spike_seq: [T, B, input_size]
         Returns output spike counts over all timesteps [B, output_size].
+        When track_ttfs=True, also returns:
+          - first_spike_idx: [B, output_size] first spike time per output neuron
+          - sample_has_spike: [B] whether any output neuron fired
+          - final_mem: [B, output_size] output membrane at the final simulated step
         """
+        num_steps = spike_seq.shape[0]
+        batch_size = spike_seq.shape[1]
+        output_size = self.fc2.out_features
+
         spk2_sum = torch.zeros(
-            spike_seq.shape[1],
-            self.fc2.out_features,
+            batch_size,
+            output_size,
+            device=spike_seq.device,
+            dtype=spike_seq.dtype,
+        )
+        first_spike_idx = None
+        has_fired = None
+        if track_ttfs:
+            first_spike_idx = torch.full(
+                (batch_size, output_size),
+                float(num_steps + 1),
+                device=spike_seq.device,
+                dtype=spike_seq.dtype,
+            )
+            has_fired = torch.zeros(
+                (batch_size, output_size),
+                device=spike_seq.device,
+                dtype=torch.bool,
+            )
+
+        final_mem = torch.zeros(
+            batch_size,
+            output_size,
             device=spike_seq.device,
             dtype=spike_seq.dtype,
         )
@@ -230,8 +261,46 @@ class ContextSNN(nn.Module):
             cur2 = self.fc2(spk1)
             spk2 = self.lif2(cur2)
             spk2_sum += spk2
+            final_mem = self.lif2.mem if hasattr(self.lif2, 'mem') else cur2
+
+            if track_ttfs:
+                spk2_fired = spk2 > 0
+                new_fired = spk2_fired & (~has_fired)
+                first_spike_idx[new_fired] = float(step)
+                has_fired = has_fired | spk2_fired
+
+                # Once all output neurons in the batch have fired once, TTFS timings are complete.
+                if torch.all(has_fired):
+                    break
+
+        if track_ttfs:
+            sample_has_spike = has_fired.any(dim=1)
+            return spk2_sum, first_spike_idx, sample_has_spike, final_mem
 
         return spk2_sum
+
+
+def decode_predictions(spike_counts, decoding_method='spike_count', first_spike_idx=None, sample_has_spike=None, final_mem=None):
+    if decoding_method == 'spike_count':
+        return torch.argmax(spike_counts, dim=1), 0
+
+    if decoding_method == 'ttfs':
+        if first_spike_idx is None or sample_has_spike is None:
+            raise ValueError("first_spike_idx and sample_has_spike are required for TTFS decoding")
+
+        preds = torch.argmin(first_spike_idx, dim=1)
+
+        all_silent = ~sample_has_spike
+        fallback_count = int(all_silent.sum().item())
+        if fallback_count:
+            if final_mem is None:
+                raise ValueError("final_mem is required when TTFS fallback is needed")
+            mem_fallback = torch.argmax(final_mem, dim=1)
+            preds = torch.where(all_silent, mem_fallback, preds)
+
+        return preds, fallback_count
+
+    raise ValueError("decoding_method must be either 'spike_count' or 'ttfs'")
 
 
 input_size = args.context_size * embedding_dim if input_mode == 'spatial' else embedding_dim
@@ -250,6 +319,7 @@ print(f"\nTraining config:")
 print(f"  Device: {device}")
 print(f"  Input mode: {input_mode}")
 print(f"  Encoding method: {encoding_method}")
+print(f"  Decoding method: {decoding_method}")
 print(f"  Context size: {args.context_size}")
 print(f"  Input size: {input_size}")
 print(f"  Hidden size: {args.num_hidden}")
@@ -267,6 +337,7 @@ def evaluate_model(model, features, labels, batch_size, device, n_steps):
     running_loss = 0.0
     running_correct = 0
     running_total = 0
+    running_fallback = 0
 
     with torch.no_grad():
         for xb, yb in eval_loader:
@@ -275,30 +346,48 @@ def evaluate_model(model, features, labels, batch_size, device, n_steps):
             yb = yb.to(device)
 
             spike_seq = spike_encode(xb, n_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
-            spike_counts = model(spike_seq)
+            need_ttfs_state = decoding_method == 'ttfs'
+            model_output = model(spike_seq, track_ttfs=need_ttfs_state)
+            if need_ttfs_state:
+                spike_counts, first_spike_idx, sample_has_spike, final_mem = model_output
+            else:
+                spike_counts = model_output
+                first_spike_idx = None
+                sample_has_spike = None
+                final_mem = None
             loss = loss_fn(spike_counts, yb)
 
             running_loss += loss.item() * xb.size(0)
-            preds = torch.argmax(spike_counts, dim=1)
+            preds, fallback_count = decode_predictions(
+                spike_counts,
+                decoding_method=decoding_method,
+                first_spike_idx=first_spike_idx,
+                sample_has_spike=sample_has_spike,
+                final_mem=final_mem,
+            )
             running_correct += (preds == yb).sum().item()
             running_total += xb.size(0)
+            running_fallback += fallback_count
 
             utils.reset(model)
 
     avg_loss = running_loss / max(1, running_total)
     avg_acc = running_correct / max(1, running_total)
-    return avg_loss, avg_acc
+    fallback_rate = running_fallback / max(1, running_total)
+    return avg_loss, avg_acc, fallback_rate
 
 
 # Train (samples are shuffled by DataLoader each epoch)
 epoch_losses = []
 epoch_accuracies = []
+epoch_ttfs_fallback_rates = []
 net.train()
 utils.reset(net)
 for epoch in range(args.epochs):
     running_loss = 0.0
     running_correct = 0
     running_total = 0
+    running_fallback = 0
 
     for xb, yb in train_loader:
         utils.reset(net)
@@ -306,7 +395,15 @@ for epoch in range(args.epochs):
         yb = yb.to(device)                                          # [B]
 
         spike_seq = spike_encode(xb, args.sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)        # [T, B, input_size]
-        spike_counts = net(spike_seq)                               # [B, num_labels]
+        need_ttfs_state = decoding_method == 'ttfs'
+        model_output = net(spike_seq, track_ttfs=need_ttfs_state)
+        if need_ttfs_state:
+            spike_counts, first_spike_idx, sample_has_spike, final_mem = model_output
+        else:
+            spike_counts = model_output
+            first_spike_idx = None
+            sample_has_spike = None
+            final_mem = None
         loss = loss_fn(spike_counts, yb)
 
         optimizer.zero_grad()
@@ -314,22 +411,36 @@ for epoch in range(args.epochs):
         optimizer.step()
 
         running_loss += loss.item() * xb.size(0)
-        preds = torch.argmax(spike_counts, dim=1)
+        preds, fallback_count = decode_predictions(
+            spike_counts,
+            decoding_method=decoding_method,
+            first_spike_idx=first_spike_idx,
+            sample_has_spike=sample_has_spike,
+            final_mem=final_mem,
+        )
         running_correct += (preds == yb).sum().item()
         running_total += xb.size(0)
+        running_fallback += fallback_count
 
         utils.reset(net)
 
     epoch_loss = running_loss / max(1, running_total)
     epoch_acc = running_correct / max(1, running_total)
+    epoch_fallback_rate = running_fallback / max(1, running_total)
     epoch_losses.append(float(epoch_loss))
     epoch_accuracies.append(float(epoch_acc))
-    print(f"Epoch {epoch + 1}/{args.epochs} | loss: {epoch_loss:.4f} | acc: {epoch_acc:.4f}")
+    epoch_ttfs_fallback_rates.append(float(epoch_fallback_rate))
+    if decoding_method == 'ttfs':
+        print(f"Epoch {epoch + 1}/{args.epochs} | loss: {epoch_loss:.4f} | acc: {epoch_acc:.4f} | ttfs_fallback_rate: {epoch_fallback_rate:.4f}")
+    else:
+        print(f"Epoch {epoch + 1}/{args.epochs} | loss: {epoch_loss:.4f} | acc: {epoch_acc:.4f}")
 
 print("Training finished.")
 
-test_loss, test_acc = evaluate_model(net, X_test, y_test, args.batch_size, device, args.sim_steps)
+test_loss, test_acc, test_ttfs_fallback_rate = evaluate_model(net, X_test, y_test, args.batch_size, device, args.sim_steps)
 print(f"Test evaluation | loss: {test_loss:.4f} | acc: {test_acc:.4f}")
+if decoding_method == 'ttfs':
+    print(f"Test TTFS fallback rate: {test_ttfs_fallback_rate:.4f}")
 
 # Save trained model checkpoint for easy reload.
 output_dir = Path(args.output_dir) or PROJECT_ROOT / 'output_results' / 'E1'
@@ -350,6 +461,7 @@ if args.save:
             "beta": args.beta,
             "input_mode": input_mode,
             "encoding_method": encoding_method,
+            "decoding_method": decoding_method,
             "label_feature": label_feature,
             "context_size": args.context_size,
             "embedding_dim": int(embedding_dim),
@@ -362,8 +474,10 @@ if args.save:
         "metrics": {
             "epoch_train_loss": epoch_losses,
             "epoch_train_accuracy": epoch_accuracies,
+            "epoch_ttfs_fallback_rate": epoch_ttfs_fallback_rates,
             "test_loss": float(test_loss),
             "test_accuracy": float(test_acc),
+            "test_ttfs_fallback_rate": float(test_ttfs_fallback_rate),
         },
         "cli_args": vars(args),
     }
@@ -385,8 +499,10 @@ training_metadata = {
     "results": {
         "epoch_train_loss": epoch_losses,
         "epoch_train_accuracy": epoch_accuracies,
+        "epoch_ttfs_fallback_rate": epoch_ttfs_fallback_rates,
         "test_loss": float(test_loss),
         "test_accuracy": float(test_acc),
+        "test_ttfs_fallback_rate": float(test_ttfs_fallback_rate),
     },
 }
 
