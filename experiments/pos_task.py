@@ -357,13 +357,13 @@ if args.save:
 # Export training metadata and results to JSON
 training_metadata = {
     "training_config": {
+        "date":now,
         "embedding_dim": int(embedding_dim),
         "input_size": input_size,
         "label_feature": label_feature,
         "num_labels": num_labels,
         "num_training_samples": int(X_train.shape[0]),
         "device": str(device),
-        "model_output_path": str(model_output_path),
     } | vars(args),  # include all CLI args in metadata
     "results": {
         "epoch_train_loss": epoch_losses,
