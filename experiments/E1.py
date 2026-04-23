@@ -26,7 +26,7 @@ parser.add_argument('--num_hidden', type=int, default=64, help='Number of hidden
 parser.add_argument('--sim_steps', type=int, default=20, help='Poisson/SNN simulation steps')
 parser.add_argument('--encoding_method', type=str, default='poisson', choices=['poisson', 'latency'], help='Spike encoding method [poisson|latency]')
 parser.add_argument('--decoding_method', type=str, default='spike_count', choices=['spike_count', 'ttfs'], help='Output decoding method [spike_count|ttfs]')
-parser.add_argument('--neuron_model', type=str, default='lif', choices=['lif', 'rleaky', 'synaptic', 'rsynaptic', 'lapicque', 'alpha', 'qlif'], help='Neuron model to use [lif|rleaky|synaptic|rsynaptic|lapicque|alpha|qlif]')
+parser.add_argument('--neuron_model', type=str, default='lif', choices=['lif', 'synaptic', 'qlif'], help='Neuron model to use [lif|synaptic|qlif]')
 parser.add_argument('--alpha', type=float, default=None, help='Synaptic decay factor for second-order neurons; defaults to beta when omitted')
 parser.add_argument('--beta', type=float, default=0.95, help='Leaky neuron decay factor')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
@@ -213,24 +213,18 @@ def spike_encode(batch_context_embeddings, n_steps, input_mode='spatial', encodi
 def build_neuron_layer(model_name, beta_value, layer_size):
     model_name = model_name.lower()
     if model_name == 'lif':
-        return snn.Leaky(beta=beta_value, init_hidden=True)
-    if model_name == 'rleaky':
-        return snn.RLeaky(beta=beta_value, linear_features=layer_size, init_hidden=True)
+        return snn.Leaky(beta=beta_value, init_hidden=False)
     if model_name == 'synaptic':
-        return snn.Synaptic(alpha=alpha, beta=beta_value, init_hidden=True)
-    if model_name == 'rsynaptic':
-        return snn.RSynaptic(alpha=alpha, beta=beta_value, linear_features=layer_size, init_hidden=True)
-    if model_name == 'lapicque':
-        return snn.Lapicque(beta=beta_value, init_hidden=True)
-    if model_name == 'alpha':
-        return snn.Alpha(alpha=alpha, beta=beta_value, init_hidden=True)
+        return snn.Synaptic(alpha=alpha, beta=beta_value, init_hidden=False)
     if model_name == 'qlif':
-        return QLIF(alpha=alpha, beta=beta_value, init_hidden=True)
-    raise ValueError("--neuron_model must be one of: lif, rleaky, synaptic, rsynaptic, lapicque, alpha, qlif")
+        return QLIF(alpha=alpha, beta=beta_value, init_hidden=False)
+    raise ValueError("--neuron_model must be one of: lif, synaptic, qlif")
 
 
 def reset_model_state(model):
-    utils.reset(model)
+    # With init_hidden=False, states are managed locally in forward pass
+    # No need to reset instance states
+    pass
 
 
 class ContextSNN(nn.Module):
@@ -284,13 +278,41 @@ class ContextSNN(nn.Module):
             dtype=spike_seq.dtype,
         )
 
-        for step in range(spike_seq.shape[0]):
+        # Determine neuron types and initialize appropriate hidden states
+        neuron_class1 = self.lif1.__class__.__name__
+        neuron_class2 = self.lif2.__class__.__name__
+        
+        mem1 = torch.zeros(batch_size, self.fc1.out_features, device=spike_seq.device, dtype=spike_seq.dtype)
+        mem2 = torch.zeros(batch_size, output_size, device=spike_seq.device, dtype=spike_seq.dtype)
+        
+        syn1 = None
+        syn2 = None
+        
+        if neuron_class1 in ('Synaptic', 'QLIF'):
+            syn1 = torch.zeros(batch_size, self.fc1.out_features, device=spike_seq.device, dtype=spike_seq.dtype)
+        
+        if neuron_class2 in ('Synaptic', 'QLIF'):
+            syn2 = torch.zeros(batch_size, output_size, device=spike_seq.device, dtype=spike_seq.dtype)
+
+        for step in range(num_steps):
             cur1 = self.fc1(spike_seq[step])
-            spk1 = self.lif1(cur1)
+            
+            # Layer 1: Call with appropriate hidden state arguments
+            if neuron_class1 in ('Synaptic', 'QLIF'):
+                spk1, syn1, mem1 = self.lif1(cur1, syn1, mem1)
+            else:  # Leaky
+                spk1, mem1 = self.lif1(cur1, mem1)
+
             cur2 = self.fc2(spk1)
-            spk2 = self.lif2(cur2)
+            
+            # Layer 2: Call with appropriate hidden state arguments
+            if neuron_class2 in ('Synaptic', 'QLIF'):
+                spk2, syn2, mem2 = self.lif2(cur2, syn2, mem2)
+            else:  # Leaky
+                spk2, mem2 = self.lif2(cur2, mem2)
+
             spk2_sum += spk2
-            final_mem = self.lif2.mem if hasattr(self.lif2, 'mem') else cur2
+            final_mem = mem2
 
             if track_ttfs:
                 spk2_fired = spk2 > 0

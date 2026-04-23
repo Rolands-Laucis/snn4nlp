@@ -37,6 +37,8 @@ label_feature = args.label_feature.lower()
 label_feature_to_index = {'upos': 1, 'xpos': 2}
 label_index = label_feature_to_index[label_feature]
 
+start_time = datetime.now()
+
 pos_train_data, embedding_dim = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_train.pkl', limit=args.limit)
 pos_dev_data, _ = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_dev.pkl', limit=args.limit)
 pos_test_data, _ = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_test.pkl', limit=args.limit)
@@ -242,6 +244,8 @@ print(f"  Output classes: {num_labels}")
 print(f"  Num steps: {args.sim_steps}")
 print(f"  Batch size: {args.batch_size}")
 print(f"  Epochs: {args.epochs}")
+print(f"  Beta: {args.beta}")
+print(f"  learning_rate: {args.learning_rate}")
 
 
 def evaluate_model(model, features, labels, batch_size, device, n_steps):
@@ -357,8 +361,10 @@ if args.save:
 # Export training metadata and results to JSON
 # del args['model_output_dir']
 training_metadata = {
+    "start_time": start_time.strftime("%Y-%m-%d %H:%M:%S"),
+    "date":now,
+    "runtime_seconds": (datetime.now() - start_time).total_seconds(),
     "training_config": {
-        "date":now,
         "embedding_dim": int(embedding_dim),
         "input_size": input_size,
         "label_feature": label_feature,
