@@ -3,7 +3,7 @@ from pathlib import Path
 import pickle
 
 # https://github.com/UniversalDependencies/UD_English-EWT
-def ReadConlluFile(path:str, min_sentence_length:int = 4, max_sentence_length:int = 30, limit:int = None):
+def ReadConlluFile(path:str, min_sentence_length:int = 5, max_sentence_length:int = None, limit:int = None):
     sentences = []
     file_path = Path(path)
     with file_path.open('r', encoding='utf-8') as f:
@@ -18,7 +18,7 @@ def ReadConlluFile(path:str, min_sentence_length:int = 4, max_sentence_length:in
                 try:
                     current_num = int(line.split('\t')[0])
                     if current_num <= prev_num:
-                        if len(words) >= min_sentence_length and len(words) <= max_sentence_length:
+                        if (not min_sentence_length or len(words) >= min_sentence_length) and (not max_sentence_length or len(words) <= max_sentence_length):
                             sentences.append(words)
                         words = []
                     annots = line.split('\t')
@@ -27,12 +27,12 @@ def ReadConlluFile(path:str, min_sentence_length:int = 4, max_sentence_length:in
                 except (ValueError, IndexError):
                     pass
             
-        if len(words) >= min_sentence_length and len(words) <= max_sentence_length:
+        if (min_sentence_length and len(words) >= min_sentence_length) and (max_sentence_length and len(words) <= max_sentence_length):
             sentences.append(words)
     return sentences, len(sentences)
 
 # https://github.com/UniversalNER/UNER_English-EWT
-def ReadIOB2File(path:str, min_sentence_length:int = 4, max_sentence_length:int = 30, limit:int = None):
+def ReadIOB2File(path:str, min_sentence_length:int = 5, max_sentence_length:int = None, limit:int = None):
     sentences = []
     file_path = Path(path)
     with file_path.open('r', encoding='utf-8') as f:
@@ -47,7 +47,7 @@ def ReadIOB2File(path:str, min_sentence_length:int = 4, max_sentence_length:int 
                 try:
                     current_num = int(line.split('\t')[0])
                     if current_num <= prev_num:
-                        if len(words) >= min_sentence_length and len(words) <= max_sentence_length:
+                        if (not min_sentence_length or len(words) >= min_sentence_length) and (not max_sentence_length or len(words) <= max_sentence_length):
                             sentences.append(words)
                         words = []
                     annots = line.split('\t')
@@ -56,7 +56,7 @@ def ReadIOB2File(path:str, min_sentence_length:int = 4, max_sentence_length:int 
                 except (ValueError, IndexError):
                     pass
             
-        if len(words) >= min_sentence_length and len(words) <= max_sentence_length:
+        if (not min_sentence_length or len(words) >= min_sentence_length) and (not max_sentence_length or len(words) <= max_sentence_length):
             sentences.append(words)
     return sentences, len(sentences)
 

@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAST_POS_DIR = PROJECT_ROOT / 'input_data' / 'cast_pos'
 
 parser = argparse.ArgumentParser(description='Train an SNN for POS tagging')
-parser.add_argument('--input_mode', type=str, default='spatial', help='Input mode for the SNN [spatial|temporal]')
+parser.add_argument('--input_mode', type=str, default='spatial', choices=['spatial', 'temporal'], help='Input mode for the SNN [spatial|temporal]')
 parser.add_argument('--label_feature', type=str, default='upos', choices=['upos', 'xpos'], help='Target label feature to predict [upos|xpos]')
 parser.add_argument('--limit', type=int, default=None, help='Limit the number of sentences for testing')
 parser.add_argument('--input_file_prefix', type=str, default='pos_d50', help='Prefix for input files')
@@ -38,6 +38,8 @@ args = parser.parse_args()
 input_mode = args.input_mode.lower()
 if input_mode not in {'spatial', 'temporal'}:
     raise ValueError("--input_mode must be either 'spatial' or 'temporal'")
+if args.context_size <= 0 or args.context_size % 2 == 0:
+    raise ValueError("--context_size must be a positive odd integer")
 encoding_method = args.encoding_method.lower()
 decoding_method = args.decoding_method.lower()
 neuron_model = args.neuron_model.lower()
@@ -71,28 +73,35 @@ print(f"Label tags ({num_labels}): {label_tags}")
 
 def build_rolling_context_samples(sentences, label_map, label_index, context_n, embedding_dim, skip_unknown_labels=False):
     """
-    Build (X, y) where each sample predicts the selected label of the last token in a context window.
+    Build (X, y) where each sample predicts the selected label of the middle token in a context window.
 
     For each sentence and token position t:
-      - Input: embeddings [t-context_n+1 ... t], with left overhang padded by zero vector
-            - Target: label at position t
+      - Input: centered embeddings [t-half_window ... t+half_window],
+               with sentence overhang on either side padded by an UNK vector
+      - Target: label at position t (the middle token)
       
     Each word_info is [lemma, upos, xpos, embed1, embed2, ...]
     """
+    if context_n <= 0 or context_n % 2 == 0:
+        raise ValueError("context_n must be a positive odd integer")
+
     x_list = []
     y_list = []
     skipped_samples = 0
-    
-    zero_embedding = torch.zeros(embedding_dim, dtype=torch.float32)
+
+    # UNK/padding embedding used whenever the context window overhangs sentence boundaries.
+    unk_embedding = torch.zeros(embedding_dim, dtype=torch.float32)
+    half_window = context_n // 2
 
     for sentence in sentences:
         for t in range(len(sentence)):
             ctx_embeddings = []
-            start = t - context_n + 1
+            start = t - half_window
+            end = t + half_window
 
-            for pos in range(start, t + 1):
-                if pos < 0:
-                    ctx_embeddings.append(zero_embedding.clone())
+            for pos in range(start, end + 1):
+                if pos < 0 or pos >= len(sentence):
+                    ctx_embeddings.append(unk_embedding.clone())
                 else:
                     # Extract embedding from word_info[3:]
                     embedding = torch.tensor(sentence[pos][3:], dtype=torch.float32)
@@ -500,7 +509,7 @@ output_dir = Path(args.output_dir) or PROJECT_ROOT / 'output_results' / 'E1'
 output_dir.mkdir(parents=True, exist_ok=True)
 
 now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-run_filename_base = "_".join([args.output_file_prefix or args.label_feature, now, f'e-{args.epochs}', f'ctx-{args.context_size}', str(round(test_acc * 100, 2))])
+run_filename_base = "_".join([args.output_file_prefix or args.label_feature, now, f'e-{args.epochs}', f'ctx-{args.context_size}', f's-{args.sim_steps}'])
 if args.save:
     model_output_path = output_dir / f'{run_filename_base}.pt'
 

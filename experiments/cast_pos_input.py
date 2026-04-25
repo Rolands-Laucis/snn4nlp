@@ -12,7 +12,7 @@ UD_DIR = INPUT_DATA_DIR / 'ud_ewt'
 parser = argparse.ArgumentParser(description='Train an SNN for UPOS tagging')
 parser.add_argument('--limit', type=int, default=None, help='Limit the number of sentences for testing (default: 100)')
 parser.add_argument('--min_sentence_length', type=int, default=5, help='Minimum sentence length (default: 5)')
-parser.add_argument('--max_sentence_length', type=int, default=40, help='Maximum sentence length (default: 40)')
+parser.add_argument('--max_sentence_length', type=int, default=None, help='Maximum sentence length (default: 40)')
 parser.add_argument('--embeddings_path', type=str, default=INPUT_DATA_DIR / 'word_embeddings' / 'glove' / 'glove_50d.pkl', help='Path to the embeddings file')
 parser.add_argument('--out_folder', type=str, default=INPUT_DATA_DIR / 'cast_pos', help='Path to save the cast embeddings')
 args = parser.parse_args()
@@ -27,7 +27,7 @@ OUT_DIR = Path(OUT_DIR)
 
 # print info about this script
 print(f"Preparing/casting input files for UPOS tagging with the following settings:")
-print(f"  - Limit: {args.limit}")
+print(vars(args))
 
 #load the UD dataset
 UD_train, _ = ReadConlluFile(UD_DIR / 'en_ewt-ud-train.conllu', min_sentence_length=args.min_sentence_length, max_sentence_length=args.max_sentence_length, limit=args.limit)
