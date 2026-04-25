@@ -23,16 +23,16 @@ parser.add_argument('--limit', type=int, default=None, help='Limit sample count 
 parser.add_argument('--input_file_prefix', type=str, default='pos_d50', help='Prefix for input files')
 parser.add_argument('--output_file_prefix', type=str, default='', help='Prefix for output files')
 parser.add_argument('--context_size', type=int, default=5, help='N context words; predict POS of the last token in the window')
-parser.add_argument('--num_hidden', type=int, default=64, help='Number of hidden units')
+parser.add_argument('--num_hidden', type=int, default=128, help='Number of hidden units')
 parser.add_argument('--sim_steps', type=int, default=20, help='Poisson/SNN simulation steps')
 parser.add_argument('--encoding_method', type=str, default='poisson', choices=['poisson', 'latency'], help='Spike encoding method [poisson|latency]')
 parser.add_argument('--decoding_method', type=str, default='spike_count', choices=['spike_count', 'ttfs'], help='Output decoding method [spike_count|ttfs]')
 parser.add_argument('--neuron_model', type=str, default='lif', choices=['lif', 'synaptic', 'qlif'], help='Neuron model to use [lif|synaptic|qlif]')
 parser.add_argument('--alpha', type=float, default=None, help='Synaptic decay factor for second-order neurons; defaults to beta when omitted')
 parser.add_argument('--beta', type=float, default=0.95, help='Leaky neuron decay factor')
-parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
+parser.add_argument('--batch_size', type=int, default=8, help='Batch size for training')
 parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs')
-parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning rate')
+parser.add_argument('--learning_rate', type=float, default=1e-5, help='Learning rate')
 parser.add_argument('--save', type=bool, default=False, help='Whether to save the model checkpoint')
 parser.add_argument('--output_dir', type=str, default=PROJECT_ROOT / 'output_results' / 'E1', help='Output directory for saved model checkpoint')
 args = parser.parse_args()
@@ -280,6 +280,7 @@ class ContextSNN(nn.Module):
         )
         first_spike_idx = None
         has_fired = None
+        ttfs_surrogate_logits = None
         if track_ttfs:
             first_spike_idx = torch.full(
                 (batch_size, output_size),
@@ -291,6 +292,11 @@ class ContextSNN(nn.Module):
                 (batch_size, output_size),
                 device=spike_seq.device,
                 dtype=torch.bool,
+            )
+            ttfs_surrogate_logits = torch.zeros(
+                (batch_size, output_size),
+                device=spike_seq.device,
+                dtype=spike_seq.dtype,
             )
 
         final_mem = torch.zeros(
@@ -337,6 +343,10 @@ class ContextSNN(nn.Module):
             final_mem = mem2
 
             if track_ttfs:
+                # Differentiable TTFS surrogate: earlier spikes contribute larger logits.
+                early_weight = float(num_steps - step) / float(num_steps)
+                ttfs_surrogate_logits = ttfs_surrogate_logits + (early_weight * spk2)
+
                 spk2_fired = spk2 > 0
                 new_fired = spk2_fired & (~has_fired)
                 first_spike_idx[new_fired] = float(step)
@@ -347,8 +357,10 @@ class ContextSNN(nn.Module):
                     break
 
         if track_ttfs:
+            # Small membrane term keeps logits informative for fully silent outputs.
+            ttfs_surrogate_logits = ttfs_surrogate_logits + (1e-3 * final_mem)
             sample_has_spike = has_fired.any(dim=1)
-            return spk2_sum, first_spike_idx, sample_has_spike, final_mem
+            return spk2_sum, first_spike_idx, sample_has_spike, final_mem, ttfs_surrogate_logits
 
         return spk2_sum
 
@@ -374,6 +386,24 @@ def decode_predictions(spike_counts, decoding_method='spike_count', first_spike_
         return preds, fallback_count
 
     raise ValueError("decoding_method must be either 'spike_count' or 'ttfs'")
+
+
+def compute_classification_loss(
+    loss_function,
+    targets,
+    decoding_method='spike_count',
+    spike_counts=None,
+    first_spike_idx=None,
+    ttfs_logits=None,
+):
+    if decoding_method == 'ttfs':
+        if ttfs_logits is None:
+            raise ValueError("ttfs_logits is required for TTFS loss")
+        return loss_function(ttfs_logits, targets)
+
+    if spike_counts is None:
+        raise ValueError("spike_counts is required for spike_count loss")
+    return loss_function(spike_counts, targets)
 
 
 input_size = args.context_size * embedding_dim if input_mode == 'spatial' else embedding_dim
@@ -425,13 +455,21 @@ def evaluate_model(model, features, labels, batch_size, device, n_steps):
             need_ttfs_state = decoding_method == 'ttfs'
             model_output = model(spike_seq, track_ttfs=need_ttfs_state)
             if need_ttfs_state:
-                spike_counts, first_spike_idx, sample_has_spike, final_mem = model_output
+                spike_counts, first_spike_idx, sample_has_spike, final_mem, ttfs_logits = model_output
             else:
                 spike_counts = model_output
                 first_spike_idx = None
                 sample_has_spike = None
                 final_mem = None
-            loss = loss_fn(spike_counts, yb)
+                ttfs_logits = None
+            loss = compute_classification_loss(
+                loss_fn,
+                yb,
+                decoding_method=decoding_method,
+                spike_counts=spike_counts,
+                first_spike_idx=first_spike_idx,
+                ttfs_logits=ttfs_logits,
+            )
 
             running_loss += loss.item() * xb.size(0)
             preds, fallback_count = decode_predictions(
@@ -479,13 +517,21 @@ for epoch in range(args.epochs):
         need_ttfs_state = decoding_method == 'ttfs'
         model_output = net(spike_seq, track_ttfs=need_ttfs_state)
         if need_ttfs_state:
-            spike_counts, first_spike_idx, sample_has_spike, final_mem = model_output
+            spike_counts, first_spike_idx, sample_has_spike, final_mem, ttfs_logits = model_output
         else:
             spike_counts = model_output
             first_spike_idx = None
             sample_has_spike = None
             final_mem = None
-        loss = loss_fn(spike_counts, yb)
+            ttfs_logits = None
+        loss = compute_classification_loss(
+            loss_fn,
+            yb,
+            decoding_method=decoding_method,
+            spike_counts=spike_counts,
+            first_spike_idx=first_spike_idx,
+            ttfs_logits=ttfs_logits,
+        )
 
         optimizer.zero_grad()
         loss.backward()

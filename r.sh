@@ -44,9 +44,9 @@ source ".venv/bin/activate"
 # E1-C
 # python experiments/E1.py --input_mode "temporal" --epochs 20 --beta 0.95 --sim_steps 20 --encoding_method "direct" --decoding_method "spike_count" --output_file_prefix "dir_sc" --batch_size 16
 
-python -u experiments/E1.py --input_mode "spatial" --epochs 50 --batch_size 16 --beta 0.95 --sim_steps 10 --encoding "poisson" --decoding "spike_count" --output_file_prefix "E1_poisson" --limit 100000
-python -u experiments/E1.py --input_mode "temporal" --epochs 50 --batch_size 16 --beta 0.95 --sim_steps 10 --encoding "latency" --decoding "ttfs" --output_file_prefix "E1_ttfs_10" --limit 100000
-python -u experiments/E1.py --input_mode "temporal" --epochs 50 --batch_size 16 --beta 0.95 --sim_steps 20 --encoding "latency" --decoding "ttfs" --output_file_prefix "E1_ttfs_20" --limit 100000
+python -u experiments/E1.py --input_mode "temporal" --epochs 50 --batch_size 16 --beta 0.95 --sim_steps 10 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "E1_ttfs_10" --limit 70000
+python -u experiments/E1.py --input_mode "spatial" --epochs 50 --batch_size 16 --beta 0.95 --sim_steps 10 --encoding_method "poisson" --decoding_method "spike_count" --output_file_prefix "E1_poisson" --limit 70000
+python -u experiments/E1.py --input_mode "temporal" --epochs 50 --batch_size 16 --beta 0.95 --sim_steps 20 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "E1_ttfs_20" --limit 70000
 # python -u experiments/E1.py --input_mode "temporal" --epochs 50 --batch_size 16 --beta 0.95 --sim_steps 10 --neuron_model "synaptic" --output_file_prefix "E1_synaptic_10" 
 # python -u experiments/E1.py --input_mode "temporal" --epochs 50 --batch_size 16 --beta 0.95 --sim_steps 20 --neuron_model "synaptic" --output_file_prefix "E1_synaptic_20" 
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --batch_size 16 --beta 0.95 --sim_steps 10 --neuron_model "qlif" --output_file_prefix "E1_qlif"
