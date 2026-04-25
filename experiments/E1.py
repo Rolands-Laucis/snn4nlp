@@ -11,6 +11,7 @@ import argparse
 from pathlib import Path
 import json
 from datetime import datetime
+import time
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAST_POS_DIR = PROJECT_ROOT / 'input_data' / 'cast_pos'
@@ -381,6 +382,7 @@ print(f"  Input mode: {input_mode}")
 print(f"  Encoding method: {encoding_method}")
 print(f"  Decoding method: {decoding_method}")
 print(f"  Neuron model: {neuron_model}")
+print(f"  Beta: {args.beta}")
 print(f"  Alpha: {alpha}")
 print(f"  Context size: {args.context_size}")
 print(f"  Input size: {input_size}")
@@ -445,7 +447,9 @@ epoch_accuracies = []
 epoch_ttfs_fallback_rates = []
 net.train()
 reset_model_state(net)
+training_start_time = time.perf_counter()
 for epoch in range(args.epochs):
+    epoch_start_time = time.perf_counter()
     running_loss = 0.0
     running_correct = 0
     running_total = 0
@@ -492,10 +496,17 @@ for epoch in range(args.epochs):
     epoch_losses.append(float(epoch_loss))
     epoch_accuracies.append(float(epoch_acc))
     epoch_ttfs_fallback_rates.append(float(epoch_fallback_rate))
+    epoch_duration_s = time.perf_counter() - epoch_start_time
+    elapsed_s = time.perf_counter() - training_start_time
+    avg_epoch_s = elapsed_s / float(epoch + 1)
+    remaining_epochs = max(0, args.epochs - (epoch + 1))
+    eta_minutes = (avg_epoch_s * remaining_epochs) / 60.0
+    print(
+        f"Epoch {epoch + 1}/{args.epochs} | loss: {epoch_loss:.4f} | acc: {epoch_acc:.4f} "
+        f"| epoch_time_s: {epoch_duration_s:.2f} | eta_min: {eta_minutes:.2f}"
+    )
     if decoding_method == 'ttfs':
-        print(f"Epoch {epoch + 1}/{args.epochs} | loss: {epoch_loss:.4f} | acc: {epoch_acc:.4f} | ttfs_fallback_rate: {epoch_fallback_rate:.4f}")
-    else:
-        print(f"Epoch {epoch + 1}/{args.epochs} | loss: {epoch_loss:.4f} | acc: {epoch_acc:.4f}")
+        print(f"TTFS fallback rate: {epoch_fallback_rate:.4f}")
 
 print("Training finished.")
 
