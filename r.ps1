@@ -17,8 +17,11 @@
 #     Write-Host "Running phase-0 E0 with beta=$beta"
 #     python experiments/E0.py --input_mode "temporal" --epochs 5 --beta $beta --sim_steps 20 --output_file_prefix "var-beta"
 # }
-python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --limit 1000 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
-# python experiments/E1.py --input_mode "spatial" --epochs 5 --beta 0.95 --sim_steps 10 --limit 10000 --encoding_method "poisson" --decoding_method "spike_count" --output_file_prefix "tmp_pois" 
+# python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --limit 1000 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
+python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --limit 1000 --encoding_method "latency" --ttfs_temporal_loss "ce_temporal_loss" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
+# python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --limit 1000 --encoding_method "latency" --ttfs_temporal_loss "mse_temporal_loss" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
+# python experiments/E1.py --input_mode "spatial" --epochs 50 --beta 0.95 --sim_steps 10 --limit 1000 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "tmp_spatial_ttfs" 
+# python experiments/E1.py --input_mode "spatial" --epochs 50 --beta 0.95 --sim_steps 10 --limit 10000 --encoding_method "poisson" --decoding_method "spike_count" --output_file_prefix "tmp_pois" 
 
 # python experiments/E1.py --input_mode "spatial" --epochs 50 --beta 0.95 --sim_steps 10 --encoding_method "poisson" --decoding_method "spike_count" --output_file_prefix "E1_poisson" 
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 10 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "E1_ttfs_10" 
