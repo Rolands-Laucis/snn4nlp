@@ -6,7 +6,7 @@
 # python experiments/cast_ner_input.py
 
 # python experiments/E0.py --limit 100 --input_mode "spatial" --epochs 10
-# python experiments/E0.py --limit 100 --input_mode "temporal"
+python experiments/E0.py --limit 10 --input_mode "temporal" --epochs 1
 
 # phase 0 - hyper parameter tuning
 # foreach ($sim_steps in @(10, 15, 20, 25, 30)) {

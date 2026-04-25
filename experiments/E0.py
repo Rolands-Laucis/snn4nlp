@@ -41,7 +41,7 @@ start_time = datetime.now()
 
 pos_train_data, embedding_dim = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_train.pkl', limit=args.limit)
 pos_dev_data, _ = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_dev.pkl', limit=args.limit)
-pos_test_data, _ = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_test.pkl', limit=args.limit)
+# pos_test_data, _ = ReadUPOSInputFile(CAST_POS_DIR / f'{args.input_file_prefix}_test.pkl', limit=args.limit)
 
 pos_train_data += pos_dev_data  # combine train and dev for training
 
@@ -51,7 +51,7 @@ if not embedding_dim and pos_train_data and pos_train_data[0] and len(pos_train_
 # Build target label vocabulary from training data
 label_tags = {
     word_info[label_index]
-    for sentence in pos_train_data + pos_test_data
+    for sentence in pos_train_data# + pos_test_data
     for word_info in sentence
 }
 
@@ -124,14 +124,14 @@ X_train, y_train = build_rolling_context_samples(
     embedding_dim,
 )
 
-X_test, y_test = build_rolling_context_samples(
-    pos_test_data[:args.limit] if args.limit else pos_test_data,
-    label_to_idx,
-    label_index,
-    args.context_size,
-    embedding_dim,
-    skip_unknown_labels=True,
-)
+# X_test, y_test = build_rolling_context_samples(
+#     pos_test_data[:args.limit] if args.limit else pos_test_data,
+#     label_to_idx,
+#     label_index,
+#     args.context_size,
+#     embedding_dim,
+#     skip_unknown_labels=True,
+# )
 
 print(f"Training samples: {X_train.shape[0]}")
 print(f"X_train shape: {X_train.shape}  # [samples, context, embed_dim]")
@@ -317,15 +317,15 @@ for epoch in range(args.epochs):
 
 print("Training finished.")
 
-test_loss, test_acc = evaluate_model(net, X_test, y_test, args.batch_size, device, args.sim_steps)
-print(f"Test evaluation | loss: {test_loss:.4f} | acc: {test_acc:.4f}")
+# test_loss, test_acc = evaluate_model(net, X_test, y_test, args.batch_size, device, args.sim_steps)
+# print(f"Test evaluation | loss: {test_loss:.4f} | acc: {test_acc:.4f}")
 
 # Save trained model checkpoint for easy reload.
 output_dir = Path(args.model_output_dir) or PROJECT_ROOT / 'output_results' / 'E0'
 output_dir.mkdir(parents=True, exist_ok=True)
 
 now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-run_filename_base = "_".join([args.output_file_prefix or args.label_feature, now, f'e-{args.epochs}', f'ctx-{args.context_size}', str(round(test_acc * 100, 2))])
+run_filename_base = "_".join([args.output_file_prefix or args.label_feature, now, f'e-{args.epochs}', f'ctx-{args.context_size}', f'b-{args.beta}', f's-{args.sim_steps}']) #, str(round(test_acc * 100, 2))
 if args.save:
     model_output_path = output_dir / f'{run_filename_base}.pt'
 
@@ -375,8 +375,8 @@ training_metadata = {
     "results": {
         "epoch_train_loss": epoch_losses,
         "epoch_train_accuracy": epoch_accuracies,
-        "test_loss": float(test_loss),
-        "test_accuracy": float(test_acc),
+        # "test_loss": float(test_loss),
+        # "test_accuracy": float(test_acc),
     },
 }
 
