@@ -350,8 +350,8 @@ if args.save:
         "metrics": {
             "epoch_train_loss": epoch_losses,
             "epoch_train_accuracy": epoch_accuracies,
-            "test_loss": float(test_loss),
-            "test_accuracy": float(test_acc),
+            # "test_loss": float(test_loss),
+            # "test_accuracy": float(test_acc),
         },
         "cli_args": vars(args),
     }
