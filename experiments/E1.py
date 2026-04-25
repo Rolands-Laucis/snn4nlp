@@ -19,7 +19,7 @@ CAST_POS_DIR = PROJECT_ROOT / 'input_data' / 'cast_pos'
 parser = argparse.ArgumentParser(description='Train an SNN for POS tagging')
 parser.add_argument('--input_mode', type=str, default='spatial', choices=['spatial', 'temporal'], help='Input mode for the SNN [spatial|temporal]')
 parser.add_argument('--label_feature', type=str, default='upos', choices=['upos', 'xpos'], help='Target label feature to predict [upos|xpos]')
-parser.add_argument('--limit', type=int, default=None, help='Limit the number of sentences for testing')
+parser.add_argument('--limit', type=int, default=None, help='Limit sample count after dataset preparation (applied separately to train and test)')
 parser.add_argument('--input_file_prefix', type=str, default='pos_d50', help='Prefix for input files')
 parser.add_argument('--output_file_prefix', type=str, default='', help='Prefix for output files')
 parser.add_argument('--context_size', type=int, default=5, help='N context words; predict POS of the last token in the window')
@@ -134,7 +134,7 @@ def build_rolling_context_samples(sentences, label_map, label_index, context_n, 
 
 # Build rolling-window training samples
 X_train, y_train = build_rolling_context_samples(
-    pos_train_data[:args.limit] if args.limit else pos_train_data,  # limit to first 100 sentences for quick testing; remove slice for full data
+    pos_train_data[:args.limit] if args.limit is not None else pos_train_data,
     label_to_idx,
     label_index,
     args.context_size,
@@ -142,13 +142,25 @@ X_train, y_train = build_rolling_context_samples(
 )
 
 X_test, y_test = build_rolling_context_samples(
-    pos_test_data[:args.limit] if args.limit else pos_test_data,
+    pos_test_data[:args.limit] if args.limit is not None else pos_test_data,
     label_to_idx,
     label_index,
     args.context_size,
     embedding_dim,
     skip_unknown_labels=True,
 )
+
+if args.limit is not None:
+    if args.limit <= 0:
+        raise ValueError("--limit must be a positive integer when provided")
+
+    train_limit = min(args.limit, X_train.shape[0])
+    test_limit = min(args.limit, X_test.shape[0])
+    X_train = X_train[:train_limit]
+    y_train = y_train[:train_limit]
+    X_test = X_test[:test_limit]
+    y_test = y_test[:test_limit]
+    print(f"Applied sample limit: train={train_limit}, test={test_limit}")
 
 print(f"Training samples: {X_train.shape[0]}")
 print(f"X_train shape: {X_train.shape}  # [samples, context, embed_dim]")
@@ -445,6 +457,7 @@ def evaluate_model(model, features, labels, batch_size, device, n_steps):
 epoch_losses = []
 epoch_accuracies = []
 epoch_ttfs_fallback_rates = []
+progress_print_every_samples = 10_000
 net.train()
 reset_model_state(net)
 training_start_time = time.perf_counter()
@@ -454,6 +467,8 @@ for epoch in range(args.epochs):
     running_correct = 0
     running_total = 0
     running_fallback = 0
+    next_progress_print_at = progress_print_every_samples
+    epoch_total_samples = len(train_loader.dataset)
 
     for xb, yb in train_loader:
         reset_model_state(net)
@@ -487,6 +502,16 @@ for epoch in range(args.epochs):
         running_correct += (preds == yb).sum().item()
         running_total += xb.size(0)
         running_fallback += fallback_count
+
+        while running_total >= next_progress_print_at:
+            progress_pct = (running_total / max(1, epoch_total_samples)) * 100.0
+            epoch_elapsed_s = time.perf_counter() - epoch_start_time
+            print(
+                f"Epoch {epoch + 1}/{args.epochs} progress | "
+                f"samples: {running_total}/{epoch_total_samples} ({progress_pct:.2f}%) | "
+                f"elapsed_s: {epoch_elapsed_s:.2f}"
+            )
+            next_progress_print_at += progress_print_every_samples
 
         reset_model_state(net)
 

@@ -1,0 +1,1 @@
+screen -dmS snn bash -c './r.sh > train.log 2>&1'
