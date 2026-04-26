@@ -689,6 +689,7 @@ training_metadata = {
         "num_labels": num_labels,
         "num_training_samples": int(X_train.shape[0]),
         "device": str(device),
+        "total_params":total_params
     } | {k: str(v) for k, v in vars(args).items()},  # include all CLI args in metadata #{k: str(v) for k, v in vars(args).items()}
     "results": {
         "epoch_train_loss": epoch_losses,
