@@ -33,5 +33,6 @@
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --neuron_model "synaptic" --output_file_prefix "E1_synaptic_20" 
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 10 --neuron_model "qlif" --output_file_prefix "E1_qlif"
 
-python experiments/E2.py --diagnose --input_mode "spatial" --epochs 5 --beta 0.95 --threshold 0.7 --sim_steps 30 --limit 5000 --encoding_method "poisson" --decoding_method "spike_count"
+# python experiments/E2.py --diagnose --input_mode "temporal" --epochs 5 --beta 0.95 --threshold 0.7 --sim_steps 30 --limit 5000 --encoding_method "poisson" --decoding_method "spike_count"
+python experiments/E2.py --input_mode "temporal" --epochs 1 --beta 0.95 --threshold 0.7 --sim_steps 30 --limit 10 --encoding_method "poisson" --decoding_method "spike_count" --save
 # python experiments/E2.py --input_mode "spatial" --epochs 50 --beta 0.95 --learn_threshold True --threshold 1 --sim_steps 100 --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"
