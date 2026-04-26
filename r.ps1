@@ -1,7 +1,10 @@
 .\venv\Scripts\Activate.ps1
 
+# python experiments/readers.py
+
 # python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.50d.txt" --out_path="input_data\word_embeddings\glove\glove_50d.pkl"
 
+# python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10
 # python experiments/cast_pos_input.py --min_sentence_length 5
 # python experiments/cast_ner_input.py
 
@@ -21,7 +24,7 @@
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 50 --limit 1000 --encoding_method "latency" --ttfs_temporal_loss "ce_temporal_loss" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.5 --sim_steps 50 --limit 1000 --encoding_method "latency" --ttfs_temporal_loss "mse_temporal_loss" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
 # python experiments/E1.py --input_mode "spatial" --epochs 50 --beta 0.95 --sim_steps 10 --limit 1000 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "tmp_spatial_ttfs" 
-python experiments/E1.py --input_mode "spatial" --epochs 50 --beta 0.9 --sim_steps 40 --limit 1000 --encoding_method "poisson" --decoding_method "spike_count" --output_file_prefix "tmp_pois" 
+# python experiments/E1.py --input_mode "spatial" --epochs 50 --beta 0.9 --sim_steps 40 --limit 1000 --encoding_method "poisson" --decoding_method "spike_count" --output_file_prefix "tmp_pois" 
 
 # python experiments/E1.py --input_mode "spatial" --epochs 50 --beta 0.95 --sim_steps 10 --encoding_method "poisson" --decoding_method "spike_count" --output_file_prefix "E1_poisson" 
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 10 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "E1_ttfs_10" 
@@ -29,3 +32,6 @@ python experiments/E1.py --input_mode "spatial" --epochs 50 --beta 0.9 --sim_ste
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 10 --neuron_model "synaptic" --output_file_prefix "E1_synaptic_10" 
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --neuron_model "synaptic" --output_file_prefix "E1_synaptic_20" 
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 10 --neuron_model "qlif" --output_file_prefix "E1_qlif"
+
+python experiments/E2.py --diagnose --input_mode "spatial" --epochs 5 --beta 0.95 --threshold 0.7 --sim_steps 30 --limit 5000 --encoding_method "poisson" --decoding_method "spike_count"
+# python experiments/E2.py --input_mode "spatial" --epochs 50 --beta 0.95 --learn_threshold True --threshold 1 --sim_steps 100 --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"

@@ -134,3 +134,33 @@ def GetEmbeddingUnkVector(embeddings, dim):
         if k in embeddings:
             return embeddings[k]
     return [0.0] * dim
+
+def ReadParquetFile(path:str, limit:int = None):
+    import pandas as pd
+    df = pd.read_parquet(path)
+    if limit is not None:
+        df = df.head(limit)
+    return df
+
+def ReadSENTInputFile(path:str, limit:int = None):
+    file_path = Path(path)
+    with file_path.open('rb') as f:
+        sentences = pickle.load(f)
+
+    if limit is not None:
+        sentences = sentences[:limit]
+    
+    if sentences and sentences[0]:
+        embedding_dim = len(sentences[0][0][0])
+    else:
+        embedding_dim = 0
+    return sentences, embedding_dim
+
+# if __name__ == "__main__":
+#     sent, emb = ReadSENTInputFile('input_data\cast_sent\sent_d50_dev.pkl')
+#     label_tags = [
+#         sentence[1]
+#         for sentence in sent
+#     ]
+#     sentence_length = len(sent[0][0])
+#     print(f"Read {len(sent)} sentences with embedding dim {emb}", len(label_tags), label_tags[:10], sentence_length)
