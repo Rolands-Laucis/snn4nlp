@@ -20,6 +20,14 @@
 #     Write-Host "Running phase-0 E0 with beta=$beta"
 #     python experiments/E0.py --input_mode "temporal" --epochs 5 --beta $beta --sim_steps 20 --output_file_prefix "var-beta"
 # }
+# best for sentiment with spatial input found to be sim_steps=30 and beta=0.95, l1 0.8, l2 0.5
+$sim_steps = 30
+$beta = 0.95
+$threshold_layer_scalars = "[1, 0.8, 0.5]"
+
+python experiments/E2.py --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"
+# python experiments/E2.py --diagnose --input_mode "spatial" --epochs 3 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"
+
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --limit 1000 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 50 --limit 1000 --encoding_method "latency" --ttfs_temporal_loss "ce_temporal_loss" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.5 --sim_steps 50 --limit 1000 --encoding_method "latency" --ttfs_temporal_loss "mse_temporal_loss" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
@@ -32,8 +40,3 @@
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 10 --neuron_model "synaptic" --output_file_prefix "E1_synaptic_10" 
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --neuron_model "synaptic" --output_file_prefix "E1_synaptic_20" 
 # python experiments/E1.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 10 --neuron_model "qlif" --output_file_prefix "E1_qlif"
-
-# python experiments/E2.py --diagnose --input_mode "temporal" --epochs 5 --beta 0.95 --threshold 0.7 --sim_steps 30 --limit 5000 --encoding_method "poisson" --decoding_method "spike_count"
-python experiments/E2.py --diagnose --input_mode "spatial" --epochs 3 --beta 0.95 --threshold 1 --threshold_layer_scalars "[1, 0.6, 0.3]" --sim_steps 25 --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"
-# python experiments/E2.py --input_mode "temporal" --epochs 1 --beta 0.95 --threshold 0.7 --sim_steps 30 --limit 10 --encoding_method "poisson" --decoding_method "spike_count" --save
-# python experiments/E2.py --input_mode "spatial" --epochs 50 --beta 0.95 --learn_threshold True --threshold 1 --sim_steps 100 --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"
