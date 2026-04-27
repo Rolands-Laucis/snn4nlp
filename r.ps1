@@ -21,12 +21,18 @@
 #     python experiments/E0.py --input_mode "temporal" --epochs 5 --beta $beta --sim_steps 20 --output_file_prefix "var-beta"
 # }
 # best for sentiment with spatial input found to be sim_steps=30 and beta=0.95, l1 0.8, l2 0.5
-$sim_steps = 30
+$sim_steps = 25 #a bit less to save on compute for temporal input
 $beta = 0.95
 $threshold_layer_scalars = "[1, 0.8, 0.5]"
+$limit = 10000
 
-python experiments/E_sent.py --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"
-# python experiments/E_sent.py --diagnose --input_mode "spatial" --epochs 3 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"
+# tests
+# python experiments/E_sent.py --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"
+python experiments/E_sent.py --diagnose --input_mode "spatial" --epochs 3 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"
+
+# sent full run
+# python experiments/E_sent.py --input_mode "spatial" --epochs 100 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --encoding_method "poisson" --decoding_method "spike_count"
+
 
 # python experiments/E_pos.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --limit 1000 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
 # python experiments/E_pos.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 50 --limit 1000 --encoding_method "latency" --ttfs_temporal_loss "ce_temporal_loss" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 

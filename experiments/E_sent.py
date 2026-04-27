@@ -66,7 +66,7 @@ neuron_model = args.neuron_model.lower()
 alpha = args.alpha if args.alpha is not None else args.beta
 
 args.threshold_layer_scalars = list(map(float, map(str.strip, args.threshold_layer_scalars.strip("[]").split(","))))
-print(f"Parsed threshold_layer_scalars: {args.threshold_layer_scalars}")
+# print(f"Parsed threshold_layer_scalars: {args.threshold_layer_scalars}")
 
 def build_sentiment_samples(samples, embedding_dim):
     """
@@ -446,6 +446,8 @@ print(f"  Decoding method: {decoding_method}")
 print(f"  Loss: {ttfs_loss_fn.__class__.__name__ if decoding_method == 'ttfs' else loss_fn.__class__.__name__}")
 print(f"  Neuron model: {neuron_model}")
 print(f"  Beta: {args.beta}")
+print(f"  Threshold: {args.threshold}")
+print(f"  Threshold layer scalars: {args.threshold_layer_scalars}")
 print(f"  Learn Beta: {args.learn_beta}")
 print(f"  Learn Threshold: {args.learn_threshold}")
 print(f"  Alpha: {alpha}")
