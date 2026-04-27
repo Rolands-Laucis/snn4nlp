@@ -37,7 +37,7 @@ parser.add_argument('--batch_size', type=int, default=16, help='Batch size for t
 parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs')
 parser.add_argument('--learning_rate', type=float, default=1e-5, help='Learning rate')
 parser.add_argument('--save', type=bool, default=False, help='Whether to save the model checkpoint')
-parser.add_argument('--output_dir', type=str, default=PROJECT_ROOT / 'output_results' / 'E1', help='Output directory for saved model checkpoint')
+parser.add_argument('--output_dir', type=str, default=PROJECT_ROOT / 'output_results' / 'E_pos', help='Output directory for saved model checkpoint')
 args = parser.parse_args()
 input_mode = args.input_mode.lower()
 if input_mode not in {'spatial', 'temporal'}:
@@ -632,7 +632,7 @@ if decoding_method == 'ttfs':
     print(f"Test TTFS mean first spike time (fired output neurons): {test_ttfs_mean_first_spike_time:.4f}")
 
 # Save trained model checkpoint for easy reload.
-output_dir = Path(args.output_dir) or PROJECT_ROOT / 'output_results' / 'E1'
+output_dir = Path(args.output_dir) or PROJECT_ROOT / 'output_results' / 'E_pos'
 output_dir.mkdir(parents=True, exist_ok=True)
 
 now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

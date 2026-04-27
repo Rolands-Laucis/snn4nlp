@@ -43,12 +43,12 @@ parser.add_argument("--batch_size", type=int, default=32, help="Batch size for t
 parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs")
 parser.add_argument("--learning_rate", type=float, default=5e-4, help="Learning rate")
 parser.add_argument("--save", action="store_true", help="Whether to save the model checkpoint")
-parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "output_results" / "E2"), help="Output directory for checkpoint and metadata")
+parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "output_results" / "E_sent"), help="Output directory for checkpoint and metadata")
 parser.add_argument("--diagnose", action="store_true", help="Run first-batch SNN diagnostics and generate plots")
 parser.add_argument(
     "--diagnose_dir",
     type=str,
-    default=str(PROJECT_ROOT / "output_results" / "E2" / "diagnostics"),
+    default=str(PROJECT_ROOT / "output_results" / "E_sent" / "diagnostics"),
     help="Directory for exported diagnostics figures",
 )
 args = parser.parse_args()
@@ -382,7 +382,7 @@ optimizer = torch.optim.Adam(net.parameters(), lr=args.learning_rate)
 
 total_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
 
-output_dir = Path(args.output_dir) or PROJECT_ROOT / "output_results" / "E2"
+output_dir = Path(args.output_dir) or PROJECT_ROOT / "output_results" / "E_sent"
 output_dir.mkdir(parents=True, exist_ok=True)
 
 now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
