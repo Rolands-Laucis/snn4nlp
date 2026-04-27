@@ -21,39 +21,52 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAST_INPUT_DIR = PROJECT_ROOT / "input_data" / "cast_sent"
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train an SNN for token-level binary sentiment analysis")
-    parser.add_argument("--input_mode", type=str, default="spatial", choices=["spatial", "temporal"], help="Input mode for the SNN [spatial|temporal]")
-    parser.add_argument("--limit", type=int, default=None, help="Limit sample count after dataset preparation (applied separately to train and test)")
-    parser.add_argument("--input_file_prefix", type=str, default="sent_d50", help="Prefix for input files")
-    parser.add_argument("--output_file_prefix", type=str, default="", help="Prefix for output files")
-    parser.add_argument("--num_hidden_1", type=int, default=256, help="Number of neurons in first hidden layer")
-    parser.add_argument("--num_hidden_2", type=int, default=128, help="Number of neurons in second hidden layer")
-    parser.add_argument("--sim_steps", type=int, default=20, help="Poisson/SNN simulation steps")
-    parser.add_argument("--encoding_method", type=str, default="poisson", choices=["poisson", "latency"], help="Spike encoding method [poisson|latency]")
-    parser.add_argument("--decoding_method", type=str, default="spike_count", choices=["spike_count", "ttfs"], help="Output decoding method [spike_count|ttfs]")
-    parser.add_argument("--ttfs_temporal_loss", type=str, default="ce_temporal_loss", choices=["ce_temporal_loss", "mse_temporal_loss"], help="Temporal loss used when decoding_method=ttfs")
-    parser.add_argument("--neuron_model", type=str, default="lif", choices=["lif", "synaptic", "qlif"], help="Neuron model to use [lif|synaptic|qlif]")
-    parser.add_argument("--alpha", type=float, default=None, help="Synaptic decay factor for second-order neurons; defaults to beta when omitted")
-    parser.add_argument("--beta", type=float, default=None, help="Leaky neuron decay factor. None for learning or random init (0..1 recommended)")
-    parser.add_argument("--learn_beta", type=bool, default=False, help="Whether to learn the beta parameter")
-    parser.add_argument("--threshold", type=float, default=None, help="Leaky neuron threshold factor. None for learning or random init (0..1 recommended)")
-    parser.add_argument("--threshold_layer_scalars", type=list, default=[1, 0.8, 0.7], help="Leaky neuron threshold scale for each layer (0..1 recommended)")
-    parser.add_argument("--learn_threshold", type=bool, default=False, help="Whether to learn the threshold parameter")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
-    parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs")
-    parser.add_argument("--learning_rate", type=float, default=5e-4, help="Learning rate")
-    parser.add_argument("--save", action="store_true", help="Whether to save the model checkpoint")
-    parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "output_results" / "E2"), help="Output directory for checkpoint and metadata")
-    parser.add_argument("--diagnose", action="store_true", help="Run first-batch SNN diagnostics and generate plots")
-    parser.add_argument(
-        "--diagnose_dir",
-        type=str,
-        default=str(PROJECT_ROOT / "output_results" / "E2"),
-        help="Directory for exported diagnostics figures",
-    )
-    return parser.parse_args()
+parser = argparse.ArgumentParser(description="Train an SNN for token-level binary sentiment analysis")
+parser.add_argument("--input_mode", type=str, default="spatial", choices=["spatial", "temporal"], help="Input mode for the SNN [spatial|temporal]")
+parser.add_argument("--limit", type=int, default=None, help="Limit sample count after dataset preparation (applied separately to train and test)")
+parser.add_argument("--input_file_prefix", type=str, default="sent_d50", help="Prefix for input files")
+parser.add_argument("--output_file_prefix", type=str, default="", help="Prefix for output files")
+parser.add_argument("--num_hidden_1", type=int, default=256, help="Number of neurons in first hidden layer")
+parser.add_argument("--num_hidden_2", type=int, default=128, help="Number of neurons in second hidden layer")
+parser.add_argument("--sim_steps", type=int, default=20, help="Poisson/SNN simulation steps")
+parser.add_argument("--encoding_method", type=str, default="poisson", choices=["poisson", "latency"], help="Spike encoding method [poisson|latency]")
+parser.add_argument("--decoding_method", type=str, default="spike_count", choices=["spike_count", "ttfs"], help="Output decoding method [spike_count|ttfs]")
+parser.add_argument("--ttfs_temporal_loss", type=str, default="ce_temporal_loss", choices=["ce_temporal_loss", "mse_temporal_loss"], help="Temporal loss used when decoding_method=ttfs")
+parser.add_argument("--neuron_model", type=str, default="lif", choices=["lif", "synaptic", "qlif"], help="Neuron model to use [lif|synaptic|qlif]")
+parser.add_argument("--alpha", type=float, default=None, help="Synaptic decay factor for second-order neurons; defaults to beta when omitted")
+parser.add_argument("--beta", type=float, default=None, help="Leaky neuron decay factor. None for learning or random init (0..1 recommended)")
+parser.add_argument("--learn_beta", type=bool, default=False, help="Whether to learn the beta parameter")
+parser.add_argument("--threshold", type=float, default=None, help="Leaky neuron threshold factor. None for learning or random init (0..1 recommended)")
+parser.add_argument("--threshold_layer_scalars", type=str, default="[1, 0.8, 0.7]", help="Leaky neuron threshold scale for each layer (0..1 recommended)")
+parser.add_argument("--learn_threshold", type=bool, default=False, help="Whether to learn the threshold parameter")
+parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
+parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs")
+parser.add_argument("--learning_rate", type=float, default=5e-4, help="Learning rate")
+parser.add_argument("--save", action="store_true", help="Whether to save the model checkpoint")
+parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "output_results" / "E2"), help="Output directory for checkpoint and metadata")
+parser.add_argument("--diagnose", action="store_true", help="Run first-batch SNN diagnostics and generate plots")
+parser.add_argument(
+    "--diagnose_dir",
+    type=str,
+    default=str(PROJECT_ROOT / "output_results" / "E2" / "diagnostics"),
+    help="Directory for exported diagnostics figures",
+)
+args = parser.parse_args()
 
+input_mode = args.input_mode.lower()
+if input_mode not in {"spatial", "temporal"}:
+    raise ValueError("--input_mode must be either 'spatial' or 'temporal'")
+if args.limit is not None and args.limit <= 0:
+    raise ValueError("--limit must be a positive integer when provided")
+
+encoding_method = args.encoding_method.lower()
+decoding_method = args.decoding_method.lower()
+ttfs_temporal_loss_name = args.ttfs_temporal_loss.lower()
+neuron_model = args.neuron_model.lower()
+alpha = args.alpha if args.alpha is not None else args.beta
+
+args.threshold_layer_scalars = list(map(float, map(str.strip, args.threshold_layer_scalars.strip("[]").split(","))))
+print(f"Parsed threshold_layer_scalars: {args.threshold_layer_scalars}")
 
 def build_sentiment_samples(samples, embedding_dim):
     """
@@ -309,18 +322,7 @@ def evaluate_model(model, features, labels, batch_size, device, n_steps):
     return avg_loss, avg_acc, fallback_rate, mean_first_spike_time
 
 
-args = parse_args()
-input_mode = args.input_mode.lower()
-if input_mode not in {"spatial", "temporal"}:
-    raise ValueError("--input_mode must be either 'spatial' or 'temporal'")
-if args.limit is not None and args.limit <= 0:
-    raise ValueError("--limit must be a positive integer when provided")
 
-encoding_method = args.encoding_method.lower()
-decoding_method = args.decoding_method.lower()
-ttfs_temporal_loss_name = args.ttfs_temporal_loss.lower()
-neuron_model = args.neuron_model.lower()
-alpha = args.alpha if args.alpha is not None else args.beta
 
 sent_train_data, embedding_dim = ReadSENTInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_train.pkl", limit=args.limit)
 sent_test_data, _ = ReadSENTInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_test.pkl", limit=args.limit)
