@@ -1,13 +1,26 @@
 from tqdm import tqdm
 from pathlib import Path
 import pickle
+from typing import Any, Sequence, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+Sentence = list[list[str]]
+Embeddings = dict[str, list[float]]
 
 # https://github.com/UniversalDependencies/UD_English-EWT
-def ReadConlluFile(path:str, min_sentence_length:int = 5, max_sentence_length:int = None, limit:int = None):
-    sentences = []
+def ReadConlluFile(
+    path: str,
+    min_sentence_length: int = 5,
+    max_sentence_length: int | None = None,
+    limit: int | None = None,
+) -> tuple[list[Sentence], int]:
+    """Read UD CoNLL-U data and return tokenized sentences with POS fields."""
+    sentences: list[Sentence] = []
     file_path = Path(path)
     with file_path.open('r', encoding='utf-8') as f:
-        words = []
+        words: Sentence = []
         prev_num = 0
         for line in tqdm(f, desc=f"Reading {file_path}", unit="lines"):
             if limit and len(sentences) >= limit:
@@ -32,11 +45,17 @@ def ReadConlluFile(path:str, min_sentence_length:int = 5, max_sentence_length:in
     return sentences, len(sentences)
 
 # https://github.com/UniversalNER/UNER_English-EWT
-def ReadIOB2File(path:str, min_sentence_length:int = 5, max_sentence_length:int = None, limit:int = None):
-    sentences = []
+def ReadIOB2File(
+    path: str,
+    min_sentence_length: int = 5,
+    max_sentence_length: int | None = None,
+    limit: int | None = None,
+) -> tuple[list[Sentence], int]:
+    """Read IOB2 NER data and return sentences as [token, ner_tag] pairs."""
+    sentences: list[Sentence] = []
     file_path = Path(path)
     with file_path.open('r', encoding='utf-8') as f:
-        words = []
+        words: Sentence = []
         prev_num = 0
         for line in tqdm(f, desc=f"Reading {file_path}", unit="lines"):
             if limit and len(sentences) >= limit:
@@ -60,8 +79,9 @@ def ReadIOB2File(path:str, min_sentence_length:int = 5, max_sentence_length:int 
             sentences.append(words)
     return sentences, len(sentences)
 
-def ReadRawEmbeddingsFile(path:str, limit:int = None):
-    embeddings = {}
+def ReadRawEmbeddingsFile(path: str, limit: int | None = None) -> tuple[Embeddings, int, int]:
+    """Read plain-text embeddings and return (embeddings, vocab_size, embedding_dim)."""
+    embeddings: Embeddings = {}
     file_path = Path(path)
     with file_path.open('r', encoding='utf-8') as f:
         for line in tqdm(f, desc=f"Reading embeddings", unit="lines"):
@@ -71,15 +91,17 @@ def ReadRawEmbeddingsFile(path:str, limit:int = None):
             embeddings[word] = vector
             if limit and len(embeddings) >= limit:
                 break
-    return embeddings, len(embeddings.keys()), len(embeddings['the'])
+    embedding_dim = len(next(iter(embeddings.values()))) if embeddings else 0
+    return embeddings, len(embeddings.keys()), embedding_dim
 
-def ReadPickledEmbeddingsFile(path:str, limit:int = None):
+def ReadPickledEmbeddingsFile(path: str, limit: int | None = None) -> tuple[Embeddings, int, int]:
+    """Read pickled embeddings from a dict or (dict, dim) tuple payload."""
     file_path = Path(path)
     with file_path.open('rb') as f:
-        payload = pickle.load(f)
+        payload: Any = pickle.load(f)
 
     if isinstance(payload, tuple):
-        embeddings = payload[0]
+        embeddings: Any = payload[0]
         stored_dim = payload[1] if len(payload) > 1 else None
     else:
         embeddings = payload
@@ -98,12 +120,13 @@ def ReadPickledEmbeddingsFile(path:str, limit:int = None):
     else:
         embedding_dim = 0
 
-    return embeddings, len(embeddings.keys()), embedding_dim
+    return embeddings, len(embeddings.keys()), int(embedding_dim)
 
-def ReadUPOSInputFile(path:str, limit:int = None):
+def ReadUPOSInputFile(path: str, limit: int | None = None) -> tuple[list[Any], int]:
+    """Read pickled UPOS model input and infer embedding dimension."""
     file_path = Path(path)
     with file_path.open('rb') as f:
-        sentences = pickle.load(f)
+        sentences: list[Any] = pickle.load(f)
 
     if limit is not None:
         sentences = sentences[:limit]
@@ -112,12 +135,13 @@ def ReadUPOSInputFile(path:str, limit:int = None):
         embedding_dim = len(sentences[0][0][3:])
     else:
         embedding_dim = 0
-    return sentences, embedding_dim
+    return sentences, int(embedding_dim)
 
-def ReadNERInputFile(path:str, limit:int = None):
+def ReadNERInputFile(path: str, limit: int | None = None) -> tuple[list[Any], int]:
+    """Read pickled NER model input and infer embedding dimension."""
     file_path = Path(path)
     with file_path.open('rb') as f:
-        sentences = pickle.load(f)
+        sentences: list[Any] = pickle.load(f)
 
     if limit is not None:
         sentences = sentences[:limit]
@@ -126,26 +150,29 @@ def ReadNERInputFile(path:str, limit:int = None):
         embedding_dim = len(sentences[0][0][2:])
     else:
         embedding_dim = 0
-    return sentences, embedding_dim
+    return sentences, int(embedding_dim)
 
-def GetEmbeddingUnkVector(embeddings, dim):
-    """Pick an UNK vector from GloVe if available, else return zero vector."""
+def GetEmbeddingUnkVector(embeddings: dict[str, Sequence[float]], dim: int) -> list[float]:
+    """Return an existing UNK embedding if present, otherwise a zero vector."""
     for k in ["<UNK>", "<unk>", "<unknown>", "[UNK]"]:
         if k in embeddings:
-            return embeddings[k]
+            return list(embeddings[k])
     return [0.0] * dim
 
-def ReadParquetFile(path:str, limit:int = None):
+def ReadParquetFile(path: str, limit: int | None = None) -> "pd.DataFrame":
+    """Read a parquet dataset and optionally truncate rows."""
     import pandas as pd
+
     df = pd.read_parquet(path)
     if limit is not None:
         df = df.head(limit)
     return df
 
-def ReadSENTInputFile(path:str, limit:int = None):
+def ReadSENTInputFile(path: str, limit: int | None = None) -> tuple[list[Any], int]:
+    """Read pickled sentence-classification input and infer embedding size."""
     file_path = Path(path)
     with file_path.open('rb') as f:
-        sentences = pickle.load(f)
+        sentences: list[Any] = pickle.load(f)
 
     if limit is not None:
         sentences = sentences[:limit]
@@ -154,7 +181,7 @@ def ReadSENTInputFile(path:str, limit:int = None):
         embedding_dim = len(sentences[0][0][0])
     else:
         embedding_dim = 0
-    return sentences, embedding_dim
+    return sentences, int(embedding_dim)
 
 # if __name__ == "__main__":
 #     sent, emb = ReadSENTInputFile('input_data\cast_sent\sent_d50_dev.pkl')

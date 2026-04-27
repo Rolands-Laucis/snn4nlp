@@ -8,6 +8,7 @@ import torch
 
 @dataclass
 class LayerDiagnostics:
+    """Time-series diagnostics for one spiking layer in a forward pass."""
     name: str
     spikes: torch.Tensor  # [T, B, N]
     membrane: torch.Tensor  # [T, B, N]
@@ -15,6 +16,7 @@ class LayerDiagnostics:
 
 
 def _resolve_threshold(neuron_layer: torch.nn.Module, default: float = 1.0) -> float:
+    """Resolve a scalar threshold from a neuron layer attribute."""
     threshold = getattr(neuron_layer, "threshold", default)
     if isinstance(threshold, torch.Tensor):
         if threshold.numel() == 0:

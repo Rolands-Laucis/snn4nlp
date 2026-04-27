@@ -2,13 +2,16 @@ import snntorch as snn
 from QLIF import QLIF
 import torch
 import numpy as np
+from typing import Literal
+
+BetaValue = float | list[float]
 
 def spike_encode(
-    batch_sequence_embeddings,
-    n_steps,
-    input_mode="spatial",
-    encoding_method="poisson"
-):
+    batch_sequence_embeddings: torch.Tensor,
+    n_steps: int,
+    input_mode: Literal["spatial", "temporal"] = "spatial",
+    encoding_method: Literal["poisson", "latency"] = "poisson",
+) -> torch.Tensor:
     """
     batch_sequence_embeddings: [B, seq_len, emb_dim]
     returns:
@@ -63,7 +66,16 @@ def spike_encode(
     raise ValueError("input_mode must be either 'spatial' or 'temporal'")
 
 
-def build_neuron_layer(model_name, beta = np.random.rand(), alpha = np.random.rand(), threshold = np.random.rand(), learn_beta=False, learn_threshold=False, threshold_layer_scalar=1.0):
+def build_neuron_layer(
+    model_name: str,
+    beta: float = np.random.rand(),
+    alpha: float = np.random.rand(),
+    threshold: float = np.random.rand(),
+    learn_beta: bool = False,
+    learn_threshold: bool = False,
+    threshold_layer_scalar: float = 1.0,
+) -> torch.nn.Module:
+    """Construct a configured spiking neuron layer by model name."""
     model_name = model_name.lower()
     if model_name == "lif":
         return snn.Leaky(beta=beta or np.random.rand(), threshold=(threshold or np.random.rand()) * threshold_layer_scalar, init_hidden=False, learn_beta=learn_beta, learn_threshold=learn_threshold)
@@ -73,8 +85,12 @@ def build_neuron_layer(model_name, beta = np.random.rand(), alpha = np.random.ra
         return QLIF(alpha=alpha or np.random.rand(), beta=beta or np.random.rand(), threshold=(threshold or np.random.rand()) * threshold_layer_scalar, init_hidden=False, learn_alpha=True, learn_beta=learn_beta, learn_threshold=learn_threshold)
     raise ValueError("--neuron_model must be one of: lif, synaptic, qlif")
 
-def get_neuron_beta_values_by_layer(model, layer_names=("lif1", "lif2", "lif3")):
-    beta_values = {}
+def get_neuron_beta_values_by_layer(
+    model: torch.nn.Module,
+    layer_names: tuple[str, ...] = ("lif1", "lif2", "lif3"),
+) -> dict[str, BetaValue]:
+    """Extract per-layer beta values for available neuron layers."""
+    beta_values: dict[str, BetaValue] = {}
     for layer_name in layer_names:
         layer = getattr(model, layer_name, None)
         if layer is None or not hasattr(layer, "beta"):
