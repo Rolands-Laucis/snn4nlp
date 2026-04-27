@@ -5,6 +5,7 @@ from pathlib import Path
 import argparse
 import os
 import numpy as np
+import torch
 # from collections import Counter
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -14,7 +15,7 @@ parser = argparse.ArgumentParser(description='Train an SNN for UPOS tagging')
 parser.add_argument('--limit', type=int, default=None, help='Limit the number of sentences for testing (default: 100)')
 parser.add_argument('--embeddings_path', type=str, default=INPUT_DATA_DIR / 'word_embeddings' / 'glove' / 'wiki_giga_2024_50_MFT20_vectors_seed_123_alpha_0.75_eta_0.075_combined.txt', help='Path to the embeddings file')
 parser.add_argument('--out_path', type=str, default=None, help='Path to save the cast embeddings')
-parser.add_argument('--normalization_mode', type=str, default='rescale', choices=['l2', 'rescale'], help='Normalization mode: l2 (unit-norm then global min-max to [0,1]) or rescale (global min-max to [0,1])')
+parser.add_argument('--normalization_mode', type=str, default='rescale', choices=['l2', 'rescale', 'tanh'], help='Normalization mode: l2 (unit-norm then global min-max to [0,1]), rescale (global min-max to [0,1]), or tanh ((tanh(x) + 1) / 2)')
 args = parser.parse_args()
 
 assert args.embeddings_path is not None, '--embeddings_path is required'
@@ -83,7 +84,7 @@ if embeddings:
 		rescaled_max = float(np.max(processed))
 		print(f"- Final scalar range after L2+rescale: [{rescaled_min:.6f}, {rescaled_max:.6f}]")
 		final_scalar_range = (rescaled_min, rescaled_max)
-	else:
+	elif args.normalization_mode == 'rescale':
 		raw_min = float(np.min(matrix))
 		raw_max = float(np.max(matrix))
 		raw_span = raw_max - raw_min
@@ -102,6 +103,15 @@ if embeddings:
 		post_min = float(np.min(processed))
 		post_max = float(np.max(processed))
 		print(f"- Final scalar range after rescale: [{post_min:.6f}, {post_max:.6f}]")
+		final_scalar_range = (post_min, post_max)
+	else:
+		processed_tensor = (torch.tanh(torch.from_numpy(matrix)) + 1.0) / 2.0
+		processed = processed_tensor.cpu().numpy()
+		post_min = float(np.min(processed))
+		post_max = float(np.max(processed))
+		print("Tanh normalization stats:")
+		print("- Applied (tanh(x) + 1) / 2 mapping")
+		print(f"- Final scalar range after tanh: [{post_min:.6f}, {post_max:.6f}]")
 		final_scalar_range = (post_min, post_max)
 
 	processed_mean = float(np.mean(processed))
