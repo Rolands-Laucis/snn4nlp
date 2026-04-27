@@ -9,12 +9,9 @@ import snntorch as snn
 import snntorch.functional as SF
 import torch
 import torch.nn as nn
-from snntorch import spikegen
-from snntorch import utils
 from torch.utils.data import DataLoader, TensorDataset
-import numpy as np
 
-from QLIF import QLIF
+from snn_util import build_neuron_layer, spike_encode, get_neuron_beta_values_by_layer
 from readers import ReadSENTInputFile
 from snn_diagnostics import collect_forward_diagnostics
 from snn_diagnostics import plot_layer_membrane_traces
@@ -41,6 +38,7 @@ def parse_args():
     parser.add_argument("--beta", type=float, default=None, help="Leaky neuron decay factor. None for learning or random init (0..1 recommended)")
     parser.add_argument("--learn_beta", type=bool, default=False, help="Whether to learn the beta parameter")
     parser.add_argument("--threshold", type=float, default=None, help="Leaky neuron threshold factor. None for learning or random init (0..1 recommended)")
+    parser.add_argument("--threshold_layer_scalars", type=list, default=[1, 0.8, 0.7], help="Leaky neuron threshold scale for each layer (0..1 recommended)")
     parser.add_argument("--learn_threshold", type=bool, default=False, help="Whether to learn the threshold parameter")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
     parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs")
@@ -104,87 +102,17 @@ def build_sentiment_samples(samples, embedding_dim):
     return X, y
 
 
-def spike_encode(
-    batch_sequence_embeddings,
-    n_steps,
-    input_mode="spatial",
-    encoding_method="poisson"
-):
-    """
-    batch_sequence_embeddings: [B, seq_len, emb_dim]
-    returns:
-      spatial: [T, B, seq_len * emb_dim]
-      temporal: [T * seq_len, B, emb_dim]
-
-        Encoding is generated first in a shared representation [T, B, seq_len, emb_dim],
-        then reshaped for the selected input_mode. This keeps encoding_method and
-        input_mode as separate choices.
-    """
-    max_abs = batch_sequence_embeddings.abs().amax(dim=(1, 2), keepdim=True).clamp_min(1e-8)
-    base_prob = (batch_sequence_embeddings.abs() / max_abs).clamp(0.0, 1.0)
-
-    # Keep explicit zero-padding vectors silent.
-    pad_mask = batch_sequence_embeddings.abs().sum(dim=2, keepdim=True).eq(0)
-    base_prob = base_prob.masked_fill(pad_mask, 0.0)
-
-    batch_size, seq_len, emb_dim = base_prob.shape
-
-    if encoding_method == "poisson":
-        spike_prob = (base_prob).clamp(0.0, 1.0)
-        # Independent Bernoulli sampling at each timestep for each input feature.
-        rand = torch.rand(
-            (n_steps, batch_size, seq_len, emb_dim),
-            device=base_prob.device,
-            dtype=base_prob.dtype,
-        )
-        spikes_4d = (rand < spike_prob.unsqueeze(0)).to(base_prob.dtype)
-    elif encoding_method == "latency":
-        spike_prob_flat = base_prob.reshape(batch_size, seq_len * emb_dim)
-        latency_spikes = spikegen.latency(
-            spike_prob_flat,
-            num_steps=n_steps,
-            threshold=0.01,
-            tau=1,
-            first_spike_time=0,
-            clip=True,
-            normalize=True,
-            linear=True,
-        )
-        spikes_4d = latency_spikes.reshape(n_steps, batch_size, seq_len, emb_dim)
-    else:
-        raise ValueError("encoding_method must be either 'poisson' or 'latency'")
-
-    if input_mode == "spatial":
-        return spikes_4d.reshape(n_steps, batch_size, seq_len * emb_dim)
-
-    if input_mode == "temporal":
-        # Present words sequentially in time using the same encoded spikes.
-        return spikes_4d.permute(2, 0, 1, 3).reshape(seq_len * n_steps, batch_size, emb_dim)
-
-    raise ValueError("input_mode must be either 'spatial' or 'temporal'")
-
-
-def build_neuron_layer(model_name, layer_size, beta_value = np.random.rand(), alpha = np.random.rand(), threshold = np.random.rand()):
-    model_name = model_name.lower()
-    if model_name == "lif":
-        return snn.Leaky(beta=beta_value if beta_value is not None else np.random.rand(), threshold=threshold if threshold is not None else np.random.rand(), init_hidden=False, learn_beta=args.learn_beta, learn_threshold=args.learn_threshold)
-    if model_name == "synaptic":
-        return snn.Synaptic(alpha=alpha if alpha is not None else np.random.rand(), beta=beta_value if beta_value is not None else np.random.rand(), threshold=threshold if threshold is not None else np.random.rand(), init_hidden=False, learn_alpha=True, learn_beta=args.learn_beta, learn_threshold=args.learn_threshold)
-    if model_name == "qlif":
-        return QLIF(alpha=alpha, beta=beta_value if beta_value is not None else np.random.rand(), threshold=threshold if threshold is not None else np.random.rand(), init_hidden=False, learn_alpha=True, learn_beta=args.learn_beta, learn_threshold=args.learn_threshold)
-    raise ValueError("--neuron_model must be one of: lif, synaptic, qlif")
-
 class SequenceSentimentSNN(nn.Module):
     """Predict binary sentiment from sequence embeddings."""
 
-    def __init__(self, input_size, hidden_size_1, hidden_size_2, output_size, beta_val, neuron_model_name):
+    def __init__(self, input_size, hidden_size_1, hidden_size_2, output_size, neuron_model_name):
         super().__init__()
         self.fc1 = nn.Linear(input_size, hidden_size_1)
-        self.lif1 = build_neuron_layer(neuron_model_name, layer_size=hidden_size_1, beta_value=args.beta, alpha=args.alpha, threshold=args.threshold)
+        self.lif1 = build_neuron_layer(neuron_model_name, beta=args.beta, alpha=args.alpha, threshold=args.threshold, threshold_layer_scalar=args.threshold_layer_scalars[0])
         self.fc2 = nn.Linear(hidden_size_1, hidden_size_2)
-        self.lif2 = build_neuron_layer(neuron_model_name, layer_size=hidden_size_2, beta_value=beta_val, alpha=args.alpha, threshold=args.threshold*0.7)
+        self.lif2 = build_neuron_layer(neuron_model_name, beta=args.beta, alpha=args.alpha, threshold=args.threshold, threshold_layer_scalar=args.threshold_layer_scalars[1])
         self.fc3 = nn.Linear(hidden_size_2, output_size)
-        self.lif3 = build_neuron_layer(neuron_model_name, layer_size=output_size, beta_value=beta_val, alpha=args.alpha, threshold=args.threshold)
+        self.lif3 = build_neuron_layer(neuron_model_name, beta=args.beta, alpha=args.alpha, threshold=args.threshold, threshold_layer_scalar=args.threshold_layer_scalars[2])
 
     def forward(self, spike_seq, track_ttfs=False):
         num_steps = spike_seq.shape[0]
@@ -265,26 +193,6 @@ class SequenceSentimentSNN(nn.Module):
         return spk3_sum
 
 
-def get_neuron_beta_values_by_layer(model):
-    beta_values = {}
-    for layer_name in ("lif1", "lif2", "lif3"):
-        layer = getattr(model, layer_name, None)
-        if layer is None or not hasattr(layer, "beta"):
-            continue
-
-        beta_value = layer.beta
-        if torch.is_tensor(beta_value):
-            beta_value = beta_value.detach().cpu().reshape(-1).tolist()
-            if len(beta_value) == 1:
-                beta_value = beta_value[0]
-        elif hasattr(beta_value, "item"):
-            beta_value = beta_value.item()
-
-        beta_values[layer_name] = beta_value
-
-    return beta_values
-
-
 def decode_predictions(spike_counts, decoding_method="spike_count", first_spike_idx=None, sample_has_spike=None, final_mem=None):
     if decoding_method == "spike_count":
         preds = torch.argmax(spike_counts, dim=1)
@@ -330,27 +238,6 @@ def compute_classification_loss(
 def save_training_metadata(metadata_path, metadata):
     with open(metadata_path, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
-
-
-def get_neuron_beta_values_by_layer(model):
-    beta_values = {}
-    for layer_name in ("lif1", "lif2", "lif3"):
-        layer = getattr(model, layer_name, None)
-        if layer is None or not hasattr(layer, "beta"):
-            continue
-
-        beta_value = layer.beta
-        if torch.is_tensor(beta_value):
-            beta_value = beta_value.detach().cpu().reshape(-1).tolist()
-            if len(beta_value) == 1:
-                beta_value = beta_value[0]
-        elif hasattr(beta_value, "item"):
-            beta_value = beta_value.item()
-
-        beta_values[layer_name] = beta_value
-
-    return beta_values
-
 
 def evaluate_model(model, features, labels, batch_size, device, n_steps):
     eval_ds = TensorDataset(features, labels)
@@ -413,7 +300,7 @@ def evaluate_model(model, features, labels, batch_size, device, n_steps):
                 running_first_spike_time_sum += float(first_spike_idx[fired_mask].sum().item())
                 running_first_spike_time_count += int(fired_mask.sum().item())
 
-            utils.reset(model)
+            snn.utils.reset(model)
 
     avg_loss = running_loss / max(1, running_total)
     avg_acc = running_correct / max(1, running_total)
@@ -474,7 +361,7 @@ print(f"Class balance (train): neg={train_negative}, pos={train_positive}")
 print(f"Class balance (test): neg={test_negative}, pos={test_positive}")
 
 input_size = sequence_length * embedding_dim if input_mode == "spatial" else embedding_dim
-net = SequenceSentimentSNN(input_size, args.num_hidden_1, args.num_hidden_2, num_labels, args.beta, neuron_model)
+net = SequenceSentimentSNN(input_size, args.num_hidden_1, args.num_hidden_2, num_labels, neuron_model)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 net = net.to(device)
