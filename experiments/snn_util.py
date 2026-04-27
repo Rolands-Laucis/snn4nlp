@@ -3,6 +3,7 @@ from QLIF import QLIF
 import torch
 import numpy as np
 from typing import Literal
+from snntorch.spikegen import latency
 
 BetaValue = float | list[float]
 
@@ -22,34 +23,27 @@ def spike_encode(
         then reshaped for the selected input_mode. This keeps encoding_method and
         input_mode as separate choices.
     """
-    max_abs = batch_sequence_embeddings.abs().amax(dim=(1, 2), keepdim=True).clamp_min(1e-8)
-    base_prob = (batch_sequence_embeddings.abs() / max_abs).clamp(0.0, 1.0)
 
-    # Keep explicit zero-padding vectors silent.
-    pad_mask = batch_sequence_embeddings.abs().sum(dim=2, keepdim=True).eq(0)
-    base_prob = base_prob.masked_fill(pad_mask, 0.0)
-
-    batch_size, seq_len, emb_dim = base_prob.shape
+    batch_size, seq_len, emb_dim = batch_sequence_embeddings.shape
 
     if encoding_method == "poisson":
-        spike_prob = (base_prob).clamp(0.0, 1.0)
         # Independent Bernoulli sampling at each timestep for each input feature.
         rand = torch.rand(
             (n_steps, batch_size, seq_len, emb_dim),
-            device=base_prob.device,
-            dtype=base_prob.dtype,
+            device=batch_sequence_embeddings.device,
+            dtype=batch_sequence_embeddings.dtype,
         )
-        spikes_4d = (rand < spike_prob.unsqueeze(0)).to(base_prob.dtype)
+        spikes_4d = (rand < batch_sequence_embeddings.unsqueeze(0)).to(batch_sequence_embeddings.dtype)
     elif encoding_method == "latency":
-        spike_prob_flat = base_prob.reshape(batch_size, seq_len * emb_dim)
-        latency_spikes = snn.spikegen.latency(
+        spike_prob_flat = batch_sequence_embeddings.reshape(batch_size, seq_len * emb_dim)
+        latency_spikes = latency(
             spike_prob_flat,
             num_steps=n_steps,
-            threshold=0.01,
-            tau=1,
             first_spike_time=0,
-            clip=True,
+            # threshold=0.01,
+            # tau=1,
             normalize=True,
+            clip=True,
             linear=True,
         )
         spikes_4d = latency_spikes.reshape(n_steps, batch_size, seq_len, emb_dim)
@@ -107,3 +101,29 @@ def get_neuron_beta_values_by_layer(
         beta_values[layer_name] = beta_value
 
     return beta_values
+
+
+def main() -> None:
+    """Run a tiny spike encoding demo when this file is executed directly."""
+    n_steps = 10
+    input_mode = "spatial"
+    encoding_methods= ("poisson", "latency")
+    scalar_values = (0.0, 0.5, 1.0)
+
+    for encoding_method in encoding_methods:
+        print(f"\nencoding_method={encoding_method}, input_mode={input_mode}")
+        for scalar in scalar_values:
+            sample = torch.tensor([[[scalar]]], dtype=torch.float32)
+            spikes = spike_encode(
+                batch_sequence_embeddings=sample,
+                n_steps=n_steps,
+                input_mode=input_mode,
+                encoding_method=encoding_method,
+            )
+            # Spatial mode output is [T, B, N], so flatten to a single 10-step train here.
+            spike_train = spikes[:, 0, 0].to(torch.int).tolist()
+            print(f"  scalar={scalar} ", spike_train)
+
+
+if __name__ == "__main__":
+    main()

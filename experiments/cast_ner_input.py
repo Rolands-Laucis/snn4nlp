@@ -36,8 +36,10 @@ NER_test, _ = ReadIOB2File(NER_DIR / 'en_ewt-ud-test.iob2', min_sentence_length=
 print(len(NER_train), len(NER_dev), len(NER_test))
 
 #load word embeddings
-embeddings, embd_count, embedding_dim = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
+embeddings, embd_count, embedding_range, embedding_dim = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
 print('Embeddings:', embd_count, 'Dimension:', embedding_dim)
+if embedding_range is not None:
+    print('Embedding scalar range:', embedding_range)
 
 unk_vector = GetEmbeddingUnkVector(embeddings, embedding_dim)
 

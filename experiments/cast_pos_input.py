@@ -36,8 +36,10 @@ UD_test, _ = ReadConlluFile(UD_DIR / 'en_ewt-ud-test.conllu', min_sentence_lengt
 print(len(UD_train), len(UD_dev), len(UD_test))
 
 #load word embeddings
-embeddings, embd_count, embedding_dim = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
+embeddings, embd_count, embedding_range, embedding_dim = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
 print('Embeddings:', embd_count, 'Dimension:', embedding_dim)
+if embedding_range is not None:
+    print('Embedding scalar range:', embedding_range)
 
 unk_vector = GetEmbeddingUnkVector(embeddings, embedding_dim)
 

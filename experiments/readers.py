@@ -94,18 +94,15 @@ def ReadRawEmbeddingsFile(path: str, limit: int | None = None) -> tuple[Embeddin
     embedding_dim = len(next(iter(embeddings.values()))) if embeddings else 0
     return embeddings, len(embeddings.keys()), embedding_dim
 
-def ReadPickledEmbeddingsFile(path: str, limit: int | None = None) -> tuple[Embeddings, int, int]:
-    """Read pickled embeddings from a dict or (dict, dim) tuple payload."""
+def ReadPickledEmbeddingsFile(path: str, limit: int | None = None) -> tuple[Embeddings, tuple[float, float] | None, int]:
+    """Read pickled embeddings from (dict, dim, scalar_range) payloads."""
     file_path = Path(path)
     with file_path.open('rb') as f:
         payload: Any = pickle.load(f)
 
-    if isinstance(payload, tuple):
         embeddings: Any = payload[0]
-        stored_dim = payload[1] if len(payload) > 1 else None
-    else:
-        embeddings = payload
-        stored_dim = None
+        stored_dim = payload[1]
+        scalar_range_raw = payload[2]
 
     if not isinstance(embeddings, dict):
         raise ValueError('Pickle file must contain an embeddings dict or (embeddings, dim) tuple')
@@ -120,7 +117,11 @@ def ReadPickledEmbeddingsFile(path: str, limit: int | None = None) -> tuple[Embe
     else:
         embedding_dim = 0
 
-    return embeddings, len(embeddings.keys()), int(embedding_dim)
+    scalar_range: tuple[float, float] | None = None
+    if isinstance(scalar_range_raw, (tuple, list)) and len(scalar_range_raw) == 2:
+        scalar_range = (float(scalar_range_raw[0]), float(scalar_range_raw[1]))
+
+    return embeddings, int(embedding_dim), scalar_range
 
 def ReadUPOSInputFile(path: str, limit: int | None = None) -> tuple[list[Any], int]:
     """Read pickled UPOS model input and infer embedding dimension."""

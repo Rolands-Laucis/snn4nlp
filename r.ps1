@@ -1,37 +1,56 @@
 .\venv\Scripts\Activate.ps1
 
+# tests
 # python experiments/readers.py
+# python experiments/snn_util.py
 
-# python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.50d.txt" --out_path="input_data\word_embeddings\glove\glove_50d.pkl"
+# python experiments/E_sent.py --diagnose --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000
+# python experiments/E_sent.py --diagnose --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000
+# python experiments/E_sent.py --diagnose --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --encoding_method "poisson" --decoding_method "spike_count"
+# python experiments/E_sent.py --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --encoding_method "poisson" --decoding_method "spike_count" --save
+
+
+# prepare data
+# python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.50d.txt" --out_path="input_data\word_embeddings\glove\glove_50d.pkl" --normalization_mode "rescale"
 
 # python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10
 # python experiments/cast_pos_input.py --min_sentence_length 5
 # python experiments/cast_ner_input.py
 
-# python experiments/E0.py --limit 100 --input_mode "spatial" --epochs 10
-# python experiments/E0.py --limit 10 --input_mode "temporal" --epochs 1
+# ---EXPERIMENTS---
 
-# phase 0 - hyper parameter tuning
-# foreach ($sim_steps in @(10, 15, 20, 25, 30)) {
-#     Write-Host "Running phase-0 E0 with sim_steps=$sim_steps"
-#     python experiments/E0.py --input_mode "temporal" --epochs 5 --beta 0.95 --sim_steps $sim_steps --output_file_prefix "var-sim_steps" --limit 10
-# }
-# foreach ($beta in @(0.5, 0.75, 0.9, 0.95, 0.99)) {
-#     Write-Host "Running phase-0 E0 with beta=$beta"
-#     python experiments/E0.py --input_mode "temporal" --epochs 5 --beta $beta --sim_steps 20 --output_file_prefix "var-beta"
-# }
+# phase 0 - hyper parameter tuning for sentiment
+foreach ($sim_steps in @(10, 15, 20, 25, 30)) {
+    foreach ($beta in @(0.5, 0.75, 0.9, 0.95, 0.99)) {
+        Write-Host "Running phase-0 with sim_steps=$sim_steps beta=$beta"
+
+        python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 5 --beta $beta --sim_steps $sim_steps --threshold 1 --threshold_layer_scalars "[1, 0.8, 0.7]" --limit 1000 --learning_rate 5e-4 --batch_size 64 --output_file_prefix "hypr-1"
+    }
+}
+
 # best for sentiment with spatial input found to be sim_steps=30 and beta=0.95, l1 0.8, l2 0.5
-$sim_steps = 25 #a bit less to save on compute for temporal input
-$beta = 0.95
-$threshold_layer_scalars = "[1, 0.8, 0.5]"
-$limit = 10000
 
-# tests
-# python experiments/E_sent.py --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"
-python experiments/E_sent.py --diagnose --input_mode "spatial" --epochs 3 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --encoding_method "poisson" --decoding_method "spike_count"
+# $sim_steps = 25 #a bit less to save on compute for temporal input
+# $beta = 0.95
+# $threshold_layer_scalars = "[1, 0.8, 0.5]"
+# $limit = 15000
+# $lr = 5e-4
+# $batch_size = 32
+# $epochs = 100
+
 
 # sent full run
-# python experiments/E_sent.py --input_mode "spatial" --epochs 100 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --encoding_method "poisson" --decoding_method "spike_count"
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --save --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size 
+# ON GPU:
+# python experiments/E_sent.py --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --save --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
+
+# spatial wins; vary encoding and decoding method for spatial input
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs 3 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size $batch_size 
+# python experiments/E_sent.py --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --epochs 3 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size $batch_size 
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --save --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size 
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "ttfs" --ttfs_temporal_loss "ce_temporal_loss" --save --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size 
+# ON GPU:
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "ttfs" --ttfs_temporal_loss "mse_temporal_loss" --save --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size 
 
 
 # python experiments/E_pos.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --limit 1000 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 

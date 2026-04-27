@@ -6,6 +6,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import snntorch as snn
+from snntorch import utils
 import snntorch.functional as SF
 import torch
 import torch.nn as nn
@@ -43,6 +44,7 @@ parser.add_argument("--batch_size", type=int, default=32, help="Batch size for t
 parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs")
 parser.add_argument("--learning_rate", type=float, default=5e-4, help="Learning rate")
 parser.add_argument("--save", action="store_true", help="Whether to save the model checkpoint")
+parser.add_argument("--eval", action="store_true", help="Whether to evaluate the model")
 parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "output_results" / "E_sent"), help="Output directory for checkpoint and metadata")
 parser.add_argument("--diagnose", action="store_true", help="Run first-batch SNN diagnostics and generate plots")
 parser.add_argument(
@@ -252,77 +254,6 @@ def save_training_metadata(metadata_path, metadata):
     with open(metadata_path, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
 
-def evaluate_model(model, features, labels, batch_size, device, n_steps):
-    eval_ds = TensorDataset(features, labels)
-    eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False)
-    model.eval()
-
-    running_loss = 0.0
-    running_correct = 0
-    running_total = 0
-    running_fallback = 0
-    running_first_spike_time_sum = 0.0
-    running_first_spike_time_count = 0
-
-    with torch.no_grad():
-        for xb, yb in eval_loader:
-            # model reset is handled by init_hidden=False in neuron layers, so no explicit reset needed here.
-            xb = xb.to(device)
-            yb = yb.to(device)
-
-            spike_seq = spike_encode(
-                xb,
-                n_steps,
-                input_mode=input_mode,
-                encoding_method=encoding_method
-            ).to(device)
-            need_ttfs_state = decoding_method == "ttfs"
-            model_output = model(spike_seq, track_ttfs=need_ttfs_state)
-            if need_ttfs_state:
-                spike_counts, first_spike_idx, sample_has_spike, final_mem, ttfs_spk_rec = model_output
-            else:
-                spike_counts = model_output
-                first_spike_idx = None
-                sample_has_spike = None
-                final_mem = None
-                ttfs_spk_rec = None
-
-            loss = compute_classification_loss(
-                loss_fn,
-                ttfs_loss_fn,
-                yb,
-                decoding_method=decoding_method,
-                spike_counts=spike_counts,
-                ttfs_spk_rec=ttfs_spk_rec,
-            )
-
-            running_loss += loss.item() * xb.size(0)
-            preds, fallback_count = decode_predictions(
-                spike_counts,
-                decoding_method=decoding_method,
-                first_spike_idx=first_spike_idx,
-                sample_has_spike=sample_has_spike,
-                final_mem=final_mem,
-            )
-            running_correct += (preds == yb).sum().item()
-            running_total += xb.size(0)
-            running_fallback += fallback_count
-
-            if need_ttfs_state and first_spike_idx is not None:
-                fired_mask = first_spike_idx <= float(spike_seq.shape[0])
-                running_first_spike_time_sum += float(first_spike_idx[fired_mask].sum().item())
-                running_first_spike_time_count += int(fired_mask.sum().item())
-
-            snn.utils.reset(model)
-
-    avg_loss = running_loss / max(1, running_total)
-    avg_acc = running_correct / max(1, running_total)
-    fallback_rate = running_fallback / max(1, running_total)
-    mean_first_spike_time = running_first_spike_time_sum / max(1, running_first_spike_time_count)
-    return avg_loss, avg_acc, fallback_rate, mean_first_spike_time
-
-
-
 
 sent_train_data, embedding_dim = ReadSENTInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_train.pkl", limit=args.limit)
 sent_test_data, _ = ReadSENTInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_test.pkl", limit=args.limit)
@@ -426,7 +357,6 @@ training_metadata = {
         "test_ttfs_fallback_rate": None,
         "test_ttfs_mean_first_spike_time": None,
         "diagnostics_enabled": bool(args.diagnose),
-        "diagnostic_files": [],
         "learned_beta_values_by_layer": None,
     },
 }
@@ -593,13 +523,15 @@ for epoch in range(args.epochs):
     epoch_mean_first_spike_time = running_first_spike_time_sum / max(1, running_first_spike_time_count)
     epoch_losses.append(float(epoch_loss))
     epoch_accuracies.append(float(epoch_acc))
-    epoch_ttfs_fallback_rates.append(float(epoch_fallback_rate))
-    epoch_ttfs_mean_first_spike_times.append(float(epoch_mean_first_spike_time))
+    if decoding_method == "ttfs":
+        epoch_ttfs_fallback_rates.append(float(epoch_fallback_rate))
+        epoch_ttfs_mean_first_spike_times.append(float(epoch_mean_first_spike_time))
 
     training_metadata["results"]["epoch_train_loss"] = epoch_losses
     training_metadata["results"]["epoch_train_accuracy"] = epoch_accuracies
-    training_metadata["results"]["epoch_ttfs_fallback_rate"] = epoch_ttfs_fallback_rates
-    training_metadata["results"]["epoch_ttfs_mean_first_spike_time"] = epoch_ttfs_mean_first_spike_times
+    if decoding_method == "ttfs":
+        training_metadata["results"]["epoch_ttfs_fallback_rate"] = epoch_ttfs_fallback_rates
+        training_metadata["results"]["epoch_ttfs_mean_first_spike_time"] = epoch_ttfs_mean_first_spike_times
     save_training_metadata(metadata_file, training_metadata)
 
     epoch_duration_s = time.perf_counter() - epoch_start_time
@@ -619,27 +551,100 @@ print("Training finished.")
 if args.diagnose:
     exit(0)
 
-test_loss, test_acc, test_ttfs_fallback_rate, test_ttfs_mean_first_spike_time = evaluate_model(
-    net,
-    X_test,
-    y_test,
-    args.batch_size,
-    device,
-    args.sim_steps,
-)
-print(f"Test evaluation | loss: {test_loss:.4f} | acc: {test_acc:.4f}")
-if decoding_method == "ttfs":
-    print(f"Test TTFS fallback rate: {test_ttfs_fallback_rate:.4f}")
-    print(f"Test TTFS mean first spike time (fired output neurons): {test_ttfs_mean_first_spike_time:.4f}")
+learned_beta_values_by_layer = None
+if args.learn_beta:
+    learned_beta_values_by_layer = get_neuron_beta_values_by_layer(net) if args.learn_beta else None
 
-learned_beta_values_by_layer = get_neuron_beta_values_by_layer(net) if args.learn_beta else None
+if args.eval:
+    def evaluate_model(model, features, labels, batch_size, device, n_steps):
+        eval_ds = TensorDataset(features, labels)
+        eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False)
+        model.eval()
 
-training_metadata["results"]["test_loss"] = float(test_loss)
-training_metadata["results"]["test_accuracy"] = float(test_acc)
-training_metadata["results"]["test_ttfs_fallback_rate"] = float(test_ttfs_fallback_rate)
-training_metadata["results"]["test_ttfs_mean_first_spike_time"] = float(test_ttfs_mean_first_spike_time)
-training_metadata["results"]["learned_beta_values_by_layer"] = learned_beta_values_by_layer
-save_training_metadata(metadata_file, training_metadata)
+        running_loss = 0.0
+        running_correct = 0
+        running_total = 0
+        running_fallback = 0
+        running_first_spike_time_sum = 0.0
+        running_first_spike_time_count = 0
+
+        with torch.no_grad():
+            for xb, yb in eval_loader:
+                # model reset is handled by init_hidden=False in neuron layers, so no explicit reset needed here.
+                xb = xb.to(device)
+                yb = yb.to(device)
+
+                spike_seq = spike_encode(
+                    xb,
+                    n_steps,
+                    input_mode=input_mode,
+                    encoding_method=encoding_method
+                ).to(device)
+                need_ttfs_state = decoding_method == "ttfs"
+                model_output = model(spike_seq, track_ttfs=need_ttfs_state)
+                if need_ttfs_state:
+                    spike_counts, first_spike_idx, sample_has_spike, final_mem, ttfs_spk_rec = model_output
+                else:
+                    spike_counts = model_output
+                    first_spike_idx = None
+                    sample_has_spike = None
+                    final_mem = None
+                    ttfs_spk_rec = None
+
+                loss = compute_classification_loss(
+                    loss_fn,
+                    ttfs_loss_fn,
+                    yb,
+                    decoding_method=decoding_method,
+                    spike_counts=spike_counts,
+                    ttfs_spk_rec=ttfs_spk_rec,
+                )
+
+                running_loss += loss.item() * xb.size(0)
+                preds, fallback_count = decode_predictions(
+                    spike_counts,
+                    decoding_method=decoding_method,
+                    first_spike_idx=first_spike_idx,
+                    sample_has_spike=sample_has_spike,
+                    final_mem=final_mem,
+                )
+                running_correct += (preds == yb).sum().item()
+                running_total += xb.size(0)
+                running_fallback += fallback_count
+
+                if need_ttfs_state and first_spike_idx is not None:
+                    fired_mask = first_spike_idx <= float(spike_seq.shape[0])
+                    running_first_spike_time_sum += float(first_spike_idx[fired_mask].sum().item())
+                    running_first_spike_time_count += int(fired_mask.sum().item())
+
+                utils.reset(model)
+
+        avg_loss = running_loss / max(1, running_total)
+        avg_acc = running_correct / max(1, running_total)
+        fallback_rate = running_fallback / max(1, running_total)
+        mean_first_spike_time = running_first_spike_time_sum / max(1, running_first_spike_time_count)
+        return avg_loss, avg_acc, fallback_rate, mean_first_spike_time
+
+    test_loss, test_acc, test_ttfs_fallback_rate, test_ttfs_mean_first_spike_time = evaluate_model(
+        net,
+        X_test,
+        y_test,
+        args.batch_size,
+        device,
+        args.sim_steps,
+    )
+    print(f"Test evaluation | loss: {test_loss:.4f} | acc: {test_acc:.4f}")
+    if decoding_method == "ttfs":
+        print(f"Test TTFS fallback rate: {test_ttfs_fallback_rate:.4f}")
+        print(f"Test TTFS mean first spike time (fired output neurons): {test_ttfs_mean_first_spike_time:.4f}")
+
+
+    training_metadata["results"]["test_loss"] = float(test_loss)
+    training_metadata["results"]["test_accuracy"] = float(test_acc)
+    training_metadata["results"]["test_ttfs_fallback_rate"] = float(test_ttfs_fallback_rate)
+    training_metadata["results"]["test_ttfs_mean_first_spike_time"] = float(test_ttfs_mean_first_spike_time)
+    training_metadata["results"]["learned_beta_values_by_layer"] = learned_beta_values_by_layer
+
 
 if args.save:
     model_output_path = output_dir / f"{run_filename_base}.pt"
@@ -681,4 +686,5 @@ if args.save:
     torch.save(checkpoint, model_output_path)
     print(f"Model checkpoint saved to {model_output_path}")
 
+save_training_metadata(metadata_file, training_metadata)
 print(f"\nTraining metadata exported to {metadata_file}")
