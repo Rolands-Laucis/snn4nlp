@@ -1,42 +1,57 @@
 .\venv\Scripts\Activate.ps1
 
-# tests
-# python experiments/readers.py
-# python experiments/snn_util.py
-
-# python experiments/E_sent.py --diagnose --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000
-# python experiments/E_sent.py --diagnose --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000
-# python experiments/E_sent.py --diagnose --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --encoding_method "poisson" --decoding_method "spike_count"
-# python experiments/E_sent.py --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --encoding_method "poisson" --decoding_method "spike_count" --save
-
-
-# prepare data
+# ---DATA PREP---
 # python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.50d.txt" --out_path="input_data\word_embeddings\glove\glove_50d.pkl" --normalization_mode "rescale"
+# python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.50d.txt" --out_path="input_data\word_embeddings\glove\glove_50d.pkl" --normalization_mode "tanh"
 
 # python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10
 # python experiments/cast_pos_input.py --min_sentence_length 5
 # python experiments/cast_ner_input.py
 
+
+# tests
+# python experiments/readers.py
+# python experiments/snn_util.py
+
+# python experiments/E_sent.py --diagnose --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000
+# python experiments/E_sent.py --diagnose --input_mode "temporal" --encoding_method "latency" --decoding_method "spike_count" --epochs 1 --beta 0.95 --threshold 1 --sim_steps 25 --limit 100
+# python experiments/E_sent.py --diagnose --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --encoding_method "poisson" --decoding_method "spike_count"
+# python experiments/E_sent.py --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --encoding_method "poisson" --decoding_method "spike_count" --save
+
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 20 --beta 0.95 --sim_steps 25 --threshold 1 --threshold_layer_scalars "[1, 0.8, 0.7]" --limit 2000 --learning_rate 1e-4 --batch_size 32 --output_file_prefix "tmp"
+
+
 # ---EXPERIMENTS---
 
+$lr = 1e-4
+
 # phase 0 - hyper parameter tuning for sentiment
-foreach ($sim_steps in @(10, 15, 20, 25, 30)) {
-    foreach ($beta in @(0.5, 0.75, 0.9, 0.95, 0.99)) {
-        Write-Host "Running phase-0 with sim_steps=$sim_steps beta=$beta"
+# foreach ($sim_steps in @(15, 20, 25, 30, 40)) {
+#     foreach ($beta in @(0.5, 0.75, 0.9, 0.95, 0.99)) {
+#         Write-Host "Running phase-0-A with sim_steps=$sim_steps beta=$beta"
 
-        python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 5 --beta $beta --sim_steps $sim_steps --threshold 1 --threshold_layer_scalars "[1, 0.8, 0.7]" --limit 1000 --learning_rate 5e-4 --batch_size 64 --output_file_prefix "hypr-1"
-    }
-}
+#         python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 10 --beta $beta --sim_steps $sim_steps --threshold 1 --threshold_layer_scalars "[1, 0.8, 0.7]" --limit 1000 --learning_rate $lr --batch_size 64 --output_file_prefix "hypr-1"
+#     }
+# }
+# best for sentiment with spatial input found to be sim_steps=40 (will use 25) and beta=0.9
+$sim_steps = 25 #a bit less to save on compute for temporal input
+$beta = 0.9
 
-# best for sentiment with spatial input found to be sim_steps=30 and beta=0.95, l1 0.8, l2 0.5
+# foreach ($l1 in @(0.6, 0.7, 0.8, 0.9)) {
+#     foreach ($l2 in @(1, 1.2, 1.2, 1.5, 2)) { #$l2 /= $l1
+#         $l2 = [math]::Round($l1/$l2, 2) # round to 2 decimal places to avoid issues with floating point representation in file names
+#         Write-Host "Running phase-0-B with l1=$l1 l2=$l2"
 
-# $sim_steps = 25 #a bit less to save on compute for temporal input
-# $beta = 0.95
-# $threshold_layer_scalars = "[1, 0.8, 0.5]"
-# $limit = 15000
-# $lr = 5e-4
-# $batch_size = 32
-# $epochs = 100
+#         python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 10 --beta $beta --sim_steps $sim_steps --threshold 1 --threshold_layer_scalars "[1, $l1, $l2]" --limit 1000 --learning_rate $lr --batch_size 64 --output_file_prefix "hypr-2"
+#     }
+# }
+# best for sentiment with spatial input found
+$threshold_layer_scalars = "[1, 0.8, 0.67]" #0.8 and 1.2, but most values are close
+
+# consistent settings for all runs
+$limit = 15000
+$batch_size = 16
+$epochs = 20
 
 
 # sent full run
