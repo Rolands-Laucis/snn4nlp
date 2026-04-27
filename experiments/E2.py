@@ -265,6 +265,26 @@ class SequenceSentimentSNN(nn.Module):
         return spk3_sum
 
 
+def get_neuron_beta_values_by_layer(model):
+    beta_values = {}
+    for layer_name in ("lif1", "lif2", "lif3"):
+        layer = getattr(model, layer_name, None)
+        if layer is None or not hasattr(layer, "beta"):
+            continue
+
+        beta_value = layer.beta
+        if torch.is_tensor(beta_value):
+            beta_value = beta_value.detach().cpu().reshape(-1).tolist()
+            if len(beta_value) == 1:
+                beta_value = beta_value[0]
+        elif hasattr(beta_value, "item"):
+            beta_value = beta_value.item()
+
+        beta_values[layer_name] = beta_value
+
+    return beta_values
+
+
 def decode_predictions(spike_counts, decoding_method="spike_count", first_spike_idx=None, sample_has_spike=None, final_mem=None):
     if decoding_method == "spike_count":
         preds = torch.argmax(spike_counts, dim=1)
@@ -305,6 +325,31 @@ def compute_classification_loss(
     if spike_counts is None:
         raise ValueError("spike_counts is required for spike_count loss")
     return spike_count_loss_function(spike_counts, targets)
+
+
+def save_training_metadata(metadata_path, metadata):
+    with open(metadata_path, "w", encoding="utf-8") as handle:
+        json.dump(metadata, handle, indent=2)
+
+
+def get_neuron_beta_values_by_layer(model):
+    beta_values = {}
+    for layer_name in ("lif1", "lif2", "lif3"):
+        layer = getattr(model, layer_name, None)
+        if layer is None or not hasattr(layer, "beta"):
+            continue
+
+        beta_value = layer.beta
+        if torch.is_tensor(beta_value):
+            beta_value = beta_value.detach().cpu().reshape(-1).tolist()
+            if len(beta_value) == 1:
+                beta_value = beta_value[0]
+        elif hasattr(beta_value, "item"):
+            beta_value = beta_value.item()
+
+        beta_values[layer_name] = beta_value
+
+    return beta_values
 
 
 def evaluate_model(model, features, labels, batch_size, device, n_steps):
@@ -446,6 +491,8 @@ else:
     raise ValueError("--ttfs_temporal_loss must be one of: ce_temporal_loss, mse_temporal_loss")
 optimizer = torch.optim.Adam(net.parameters(), lr=args.learning_rate)
 
+total_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
+
 output_dir = Path(args.output_dir) or PROJECT_ROOT / "output_results" / "E2"
 output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -460,8 +507,43 @@ run_filename_base = "_".join(
     ]
 )
 
+metadata_file = output_dir / f"{run_filename_base}.json"
+training_metadata = {
+    "training_config": {
+        "date": now,
+        "task": "token_level_binary_sentiment",
+        "embedding_dim": int(embedding_dim),
+        "sequence_length": int(sequence_length),
+        "input_size": int(input_size),
+        "num_labels": num_labels,
+        "num_training_samples": int(X_train.shape[0]),
+        "num_test_samples": int(X_test.shape[0]),
+        "device": str(device),
+        "total_params": total_params,
+        "train_neg": train_negative,
+        "train_pos": train_positive,
+        "test_neg": test_negative,
+        "test_pos": test_positive,
+        "learn_beta": bool(args.learn_beta),
+        "learn_threshold": bool(args.learn_threshold),
+    } | {k: str(v) for k, v in vars(args).items()},
+    "results": {
+        "epoch_train_loss": [],
+        "epoch_train_accuracy": [],
+        "epoch_ttfs_fallback_rate": [],
+        "epoch_ttfs_mean_first_spike_time": [],
+        "test_loss": None,
+        "test_accuracy": None,
+        "test_ttfs_fallback_rate": None,
+        "test_ttfs_mean_first_spike_time": None,
+        "diagnostics_enabled": bool(args.diagnose),
+        "diagnostic_files": [],
+        "learned_beta_values_by_layer": None,
+    },
+}
+save_training_metadata(metadata_file, training_metadata)
+
 diagnose_dir = Path(args.diagnose_dir)
-diagnostic_paths = []
 diagnostics_ran = False
 if args.diagnose:
     diagnose_dir.mkdir(parents=True, exist_ok=True)
@@ -488,7 +570,6 @@ print(f"  Num steps: {args.sim_steps}")
 print(f"  Batch size: {args.batch_size}")
 print(f"  Epochs: {args.epochs}")
 print(f"  Learning rate: {args.learning_rate}")
-total_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
 print(f"  Total learnable parameters: {total_params}")
 
 
@@ -545,7 +626,6 @@ for epoch in range(args.epochs):
             )
             spike_path = diagnose_dir / f"{diag_filename}_layer_spike_trains.png"
             spike_fig.savefig(spike_path, dpi=200, bbox_inches="tight")
-            diagnostic_paths.append(str(spike_path))
 
             output_layer_name = list(diagnostics.keys())[-1]
             output_mem_fig, _ = plot_layer_membrane_traces(
@@ -555,16 +635,13 @@ for epoch in range(args.epochs):
             )
             output_mem_path = diagnose_dir / f"{diag_filename}_{output_layer_name}_membranes.png"
             output_mem_fig.savefig(output_mem_path, dpi=200, bbox_inches="tight")
-            diagnostic_paths.append(str(output_mem_path))
 
             plt.close("all")
 
             print(f"Diagnostics completed for first training batch. Output layer: {output_layer_name}")
             diagnostics_ran = True
-            # for p in diagnostic_paths:
-            #     print(f"  saved: {p}")
 
-            if epoch == args.epochs - 1:
+            if epoch + 1 == args.epochs:
                 # always exit after diagnostics to avoid long training runs when only diagnostics are desired
                 exit(0)
 
@@ -628,6 +705,12 @@ for epoch in range(args.epochs):
     epoch_ttfs_fallback_rates.append(float(epoch_fallback_rate))
     epoch_ttfs_mean_first_spike_times.append(float(epoch_mean_first_spike_time))
 
+    training_metadata["results"]["epoch_train_loss"] = epoch_losses
+    training_metadata["results"]["epoch_train_accuracy"] = epoch_accuracies
+    training_metadata["results"]["epoch_ttfs_fallback_rate"] = epoch_ttfs_fallback_rates
+    training_metadata["results"]["epoch_ttfs_mean_first_spike_time"] = epoch_ttfs_mean_first_spike_times
+    save_training_metadata(metadata_file, training_metadata)
+
     epoch_duration_s = time.perf_counter() - epoch_start_time
     elapsed_s = time.perf_counter() - training_start_time
     avg_epoch_s = elapsed_s / float(epoch + 1)
@@ -657,6 +740,15 @@ print(f"Test evaluation | loss: {test_loss:.4f} | acc: {test_acc:.4f}")
 if decoding_method == "ttfs":
     print(f"Test TTFS fallback rate: {test_ttfs_fallback_rate:.4f}")
     print(f"Test TTFS mean first spike time (fired output neurons): {test_ttfs_mean_first_spike_time:.4f}")
+
+learned_beta_values_by_layer = get_neuron_beta_values_by_layer(net) if args.learn_beta else None
+
+training_metadata["results"]["test_loss"] = float(test_loss)
+training_metadata["results"]["test_accuracy"] = float(test_acc)
+training_metadata["results"]["test_ttfs_fallback_rate"] = float(test_ttfs_fallback_rate)
+training_metadata["results"]["test_ttfs_mean_first_spike_time"] = float(test_ttfs_mean_first_spike_time)
+training_metadata["results"]["learned_beta_values_by_layer"] = learned_beta_values_by_layer
+save_training_metadata(metadata_file, training_metadata)
 
 if args.save:
     model_output_path = output_dir / f"{run_filename_base}.pt"
@@ -691,46 +783,11 @@ if args.save:
             "test_accuracy": float(test_acc),
             "test_ttfs_fallback_rate": float(test_ttfs_fallback_rate),
             "test_ttfs_mean_first_spike_time": float(test_ttfs_mean_first_spike_time),
+            "learned_beta_values_by_layer": learned_beta_values_by_layer,
         },
         "cli_args": vars(args),
     }
     torch.save(checkpoint, model_output_path)
     print(f"Model checkpoint saved to {model_output_path}")
-
-training_metadata = {
-    "training_config": {
-        "date": now,
-        "task": "token_level_binary_sentiment",
-        "embedding_dim": int(embedding_dim),
-        "sequence_length": int(sequence_length),
-        "input_size": int(input_size),
-        "num_labels": num_labels,
-        "num_training_samples": int(X_train.shape[0]),
-        "num_test_samples": int(X_test.shape[0]),
-        "device": str(device),
-        "total_params": total_params,
-        "train_neg": train_negative,
-        "train_pos": train_positive,
-        "test_neg": test_negative,
-        "test_pos": test_positive,
-    }
-    | {k: str(v) for k, v in vars(args).items()},
-    "results": {
-        "epoch_train_loss": epoch_losses,
-        "epoch_train_accuracy": epoch_accuracies,
-        "epoch_ttfs_fallback_rate": epoch_ttfs_fallback_rates,
-        "epoch_ttfs_mean_first_spike_time": epoch_ttfs_mean_first_spike_times,
-        "test_loss": float(test_loss),
-        "test_accuracy": float(test_acc),
-        "test_ttfs_fallback_rate": float(test_ttfs_fallback_rate),
-        "test_ttfs_mean_first_spike_time": float(test_ttfs_mean_first_spike_time),
-        "diagnostics_enabled": bool(args.diagnose),
-        "diagnostic_files": diagnostic_paths,
-    },
-}
-
-metadata_file = output_dir / f"{run_filename_base}.json"
-with open(metadata_file, "w", encoding="utf-8") as f:
-    json.dump(training_metadata, f, indent=2)
 
 print(f"\nTraining metadata exported to {metadata_file}")
