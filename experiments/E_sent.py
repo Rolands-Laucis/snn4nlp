@@ -327,10 +327,13 @@ run_filename_base = "_".join(
     ]
 )
 
+training_start_date = datetime.now()
 metadata_file = output_dir / f"{run_filename_base}.json"
 training_metadata = {
     "training_config": {
-        "date": now,
+        "training_start_date": training_start_date.strftime("%Y-%m-%d %H:%M:%S"),
+        "training_end_date": None,
+        "training_duration_s": None,
         "task": "token_level_binary_sentiment",
         "embedding_dim": int(embedding_dim),
         "sequence_length": int(sequence_length),
@@ -554,6 +557,7 @@ if args.diagnose:
 learned_beta_values_by_layer = None
 if args.learn_beta:
     learned_beta_values_by_layer = get_neuron_beta_values_by_layer(net) if args.learn_beta else None
+    training_metadata["results"]["learned_beta_values_by_layer"] = learned_beta_values_by_layer
 
 if args.eval:
     def evaluate_model(model, features, labels, batch_size, device, n_steps):
@@ -643,7 +647,6 @@ if args.eval:
     training_metadata["results"]["test_accuracy"] = float(test_acc)
     training_metadata["results"]["test_ttfs_fallback_rate"] = float(test_ttfs_fallback_rate)
     training_metadata["results"]["test_ttfs_mean_first_spike_time"] = float(test_ttfs_mean_first_spike_time)
-    training_metadata["results"]["learned_beta_values_by_layer"] = learned_beta_values_by_layer
 
 
 if args.save:
@@ -686,5 +689,8 @@ if args.save:
     torch.save(checkpoint, model_output_path)
     print(f"Model checkpoint saved to {model_output_path}")
 
+training_end_date = datetime.now()
+training_metadata["training_config"]["training_end_date"] = training_end_date.strftime("%Y-%m-%d %H:%M:%S")
+training_metadata["training_config"]["training_duration_s"] = (training_end_date - training_start_date).total_seconds()
 save_training_metadata(metadata_file, training_metadata)
 print(f"\nTraining metadata exported to {metadata_file}")

@@ -18,7 +18,7 @@
 # python experiments/E_sent.py --diagnose --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --encoding_method "poisson" --decoding_method "spike_count"
 # python experiments/E_sent.py --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --encoding_method "poisson" --decoding_method "spike_count" --save
 
-# python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 20 --beta 0.95 --sim_steps 25 --threshold 1 --threshold_layer_scalars "[1, 0.8, 0.7]" --limit 2000 --learning_rate 1e-4 --batch_size 32 --output_file_prefix "tmp"
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 2 --beta 0.9 --sim_steps 25 --threshold 1 --threshold_layer_scalars "[1, 0.8, 0.7]" --limit 15000 --learning_rate 1e-4 --batch_size 16 --output_file_prefix "tmp" --eval
 
 
 # ---EXPERIMENTS---
@@ -38,26 +38,36 @@ $sim_steps = 25 #a bit less to save on compute for temporal input
 $beta = 0.9
 
 # foreach ($l1 in @(0.6, 0.7, 0.8, 0.9)) {
-#     foreach ($l2 in @(1, 1.2, 1.2, 1.5, 2)) { #$l2 /= $l1
-#         $l2 = [math]::Round($l1/$l2, 2) # round to 2 decimal places to avoid issues with floating point representation in file names
+#     foreach ($l2 in @(1, 1.1, 1.2, 1.5, 2)) { #$l2 /= $l1
+#         $l2 = [math]::Round($l1/$l2, 2) # round to 2 decimal places
 #         Write-Host "Running phase-0-B with l1=$l1 l2=$l2"
 
 #         python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 10 --beta $beta --sim_steps $sim_steps --threshold 1 --threshold_layer_scalars "[1, $l1, $l2]" --limit 1000 --learning_rate $lr --batch_size 64 --output_file_prefix "hypr-2"
 #     }
 # }
 # best for sentiment with spatial input found
-$threshold_layer_scalars = "[1, 0.8, 0.67]" #0.8 and 1.2, but most values are close
+$threshold_layer_scalars = "[1, 0.8, 0.7]" #0.8 and 1.2, but most values are close
 
 # consistent settings for all runs
-$limit = 15000
-$batch_size = 16
-$epochs = 20
+$limit = 20000
+$batch_size = 32
+$epochs = 50
 
 
 # sent full run
-# python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --save --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size 
-# ON GPU:
-# python experiments/E_sent.py --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --save --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --save --eval --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size 
+# python experiments/E_sent.py --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --save --eval --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
+# temporal mode is quite less accurate in train, but the test score is very close to train, meaning it prob generalizes better than spatial mode.
+# need to test, if other hyper params would improve it:
+
+# foreach ($sim_steps in @(15, 20, 25, 30, 40)) {
+#     Write-Host "Running phase-1-B with sim_steps=$sim_steps beta=$beta"
+
+#     python experiments/E_sent.py --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --epochs 10 --beta $beta --learn_beta True --sim_steps $sim_steps --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --limit 1000 --learning_rate $lr --batch_size 64 --output_file_prefix "hypr-3"
+# }
+# the best accuracy is still with sim_steps=25, and learning beta doesn't seem to help much, as the learned beta values are all close to the initial value of 0.9, so will keep it fixed at 0.9 for all runs.
+# for the sake of computational cost, will use spatial input for the rest of the experiments, as it trains much faster, and has higher train accuracy
+
 
 # spatial wins; vary encoding and decoding method for spatial input
 # python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs 3 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size $batch_size 
