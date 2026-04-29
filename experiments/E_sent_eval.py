@@ -1,5 +1,6 @@
 import argparse
 import json
+import time
 from pathlib import Path
 
 import snntorch.functional as SF
@@ -345,6 +346,7 @@ def evaluate_model(args):
 	loss_fn = nn.CrossEntropyLoss()
 	ttfs_loss_fn = get_ttfs_loss(ttfs_temporal_loss_name)
 
+	eval_start = time.perf_counter()
 	test_loss, test_acc, test_ttfs_fallback_rate, test_ttfs_mean_first_spike_time, test_avg_ac_ops, test_avg_energy_pj = evaluate_batches(
 		model,
 		X_eval,
@@ -360,20 +362,16 @@ def evaluate_model(args):
 		estimate_energy=estimate_energy,
 		eac_pj=eac_pj,
 	)
+	eval_time_ms = (time.perf_counter() - eval_start) * 1000.0
 
-	results = {
+	results = model_config | {
 		"model_path": str(model_path),
 		"split": args.split,
 		"samples": int(X_eval.shape[0]),
 		"batch_size": int(batch_size),
-		"sim_steps": int(sim_steps),
-		"device": str(device),
-		"input_mode": input_mode,
-		"encoding_method": encoding_method,
-		"decoding_method": decoding_method,
-		"ttfs_temporal_loss": ttfs_temporal_loss_name,
-		"loss": float(test_loss),
-		"accuracy": float(test_acc),
+		"eval_time_ms": float(eval_time_ms),
+		"eval_loss": float(test_loss),
+		"eval_accuracy": float(test_acc),
 		"ttfs_fallback_rate": float(test_ttfs_fallback_rate),
 		"ttfs_mean_first_spike_time": float(test_ttfs_mean_first_spike_time),
 	}
@@ -386,7 +384,8 @@ def evaluate_model(args):
 
 	print(
 		f"Evaluation | split={results['split']} | samples={results['samples']} "
-		f"| loss={results['loss']:.4f} | acc={results['accuracy']:.4f}"
+		f"| loss={results['eval_loss']:.4f} | acc={results['eval_accuracy']:.4f} "
+		f"| eval_time_ms={results['eval_time_ms']:.2f}"
 	)
 	if decoding_method == "ttfs":
 		print(f"TTFS fallback rate: {results['ttfs_fallback_rate']:.4f}")

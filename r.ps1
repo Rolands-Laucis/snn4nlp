@@ -1,8 +1,11 @@
 .\venv\Scripts\Activate.ps1
 
 # ---DATA PREP---
-# python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.50d.txt" --out_path="input_data\word_embeddings\glove\glove_50d.pkl" --normalization_mode "rescale"
 # python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.50d.txt" --out_path="input_data\word_embeddings\glove\glove_50d.pkl" --normalization_mode "tanh"
+# python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.50d.txt" --out_path="input_data\word_embeddings\glove\glove_50d.pkl" --normalization_mode "sigmoid"
+#rescale and L2 norm were giving unintuitive results with bad training performance, where the models didnt seem to learn at all
+# sigmoid is *4 because it makes the sigmoid steeper, pushing more values closer to 0 or 1. This seems intuitive to use up more of the bulk values in the desired range
+# sigmoid seems to perform the same as tanh, but might be faster to compute. I stick to tanh
 
 # python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10
 # python experiments/cast_pos_input.py --min_sentence_length 5
@@ -12,13 +15,6 @@
 # tests
 # python experiments/readers.py
 # python experiments/snn_util.py
-
-# python experiments/E_sent.py --diagnose --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000
-# python experiments/E_sent.py --diagnose --input_mode "temporal" --encoding_method "latency" --decoding_method "spike_count" --epochs 1 --beta 0.95 --threshold 1 --sim_steps 25 --limit 100
-# python experiments/E_sent.py --diagnose --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --encoding_method "poisson" --decoding_method "spike_count"
-# python experiments/E_sent.py --input_mode "spatial" --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --encoding_method "poisson" --decoding_method "spike_count" --save
-
-# python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 2 --beta 0.9 --sim_steps 25 --threshold 1 --threshold_layer_scalars "[1, 0.8, 0.7]" --limit 15000 --learning_rate 1e-4 --batch_size 16 --output_file_prefix "tmp" --eval
 
 
 # ---EXPERIMENTS---
@@ -53,6 +49,9 @@ $limit = 20000
 $batch_size = 32
 $epochs = 50
 
+# tests
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --save --epochs 10 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --output_file_prefix "sigmoid"
+
 
 # sent full run
 # python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --save --eval --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size 
@@ -76,11 +75,7 @@ $epochs = 50
 # TODO FULL temporal setup, just to double check:
 # python experiments/E_sent.py --input_mode "temporal" --encoding_method "latency" --decoding_method "ttfs" --ttfs_temporal_loss "ce_temporal_loss" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "temporal_lat_ttfs_ce"
 
-# diagnose plots of full models
-# python experiments/E_sent_eval.py --diagnose --model_path "output_results\E_sent\main\lat_sc_2026-04-28_13-42-47_e-50_s-25_spatial.pt" --encoding_method "latency" --decoding_method "spike_count" --limit 1 --sim_steps $sim_steps 
-python experiments/E_sent_eval.py --diagnose --model_path "output_results\E_sent\main\lat_ttfs_ce_2026-04-28_13-58-26_e-50_s-25_spatial.pt" --encoding_method "latency" --decoding_method "ttfs" --limit 1 --sim_steps $sim_steps 
-python experiments/E_sent_eval.py --diagnose --model_path "output_results\E_sent\main\sent_2026-04-28_10-13-09_e-50_s-25_spatial.pt" --encoding_method "poisson" --decoding_method "spike_count" --limit 1 --sim_steps $sim_steps 
-python experiments/E_sent_eval.py --diagnose --model_path "output_results\E_sent\main\sent_2026-04-28_10-30-42_e-50_s-25_temporal.pt" --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --limit 1 --sim_steps $sim_steps 
+
 
 # python experiments/E_pos.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --limit 1000 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
 # python experiments/E_pos.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 50 --limit 1000 --encoding_method "latency" --ttfs_temporal_loss "ce_temporal_loss" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
