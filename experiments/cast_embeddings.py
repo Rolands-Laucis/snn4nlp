@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser(description='Train an SNN for UPOS tagging')
 parser.add_argument('--limit', type=int, default=None, help='Limit the number of sentences for testing (default: 100)')
 parser.add_argument('--embeddings_path', type=str, default=INPUT_DATA_DIR / 'word_embeddings' / 'glove' / 'wiki_giga_2024_50_MFT20_vectors_seed_123_alpha_0.75_eta_0.075_combined.txt', help='Path to the embeddings file')
 parser.add_argument('--out_path', type=str, default=None, help='Path to save the cast embeddings')
-parser.add_argument('--normalization_mode', type=str, default='rescale', choices=['l2', 'rescale', 'tanh'], help='Normalization mode: l2 (unit-norm then global min-max to [0,1]), rescale (global min-max to [0,1]), or tanh ((tanh(x) + 1) / 2)')
+parser.add_argument('--normalization_mode', type=str, default='sigmoid', choices=['l2', 'rescale', 'tanh', 'sigmoid'], help='Normalization mode: l2 (unit-norm then global min-max to [0,1]), rescale (global min-max to [0,1]), tanh ((tanh(x) + 1) / 2), or sigmoid (sigmoid(4*x))')
 args = parser.parse_args()
 
 assert args.embeddings_path is not None, '--embeddings_path is required'
@@ -104,7 +104,7 @@ if embeddings:
 		post_max = float(np.max(processed))
 		print(f"- Final scalar range after rescale: [{post_min:.6f}, {post_max:.6f}]")
 		final_scalar_range = (post_min, post_max)
-	else:
+	elif args.normalization_mode == 'tanh':
 		processed_tensor = (torch.tanh(torch.from_numpy(matrix)) + 1.0) / 2.0
 		processed = processed_tensor.cpu().numpy()
 		post_min = float(np.min(processed))
@@ -112,6 +112,16 @@ if embeddings:
 		print("Tanh normalization stats:")
 		print("- Applied (tanh(x) + 1) / 2 mapping")
 		print(f"- Final scalar range after tanh: [{post_min:.6f}, {post_max:.6f}]")
+		final_scalar_range = (post_min, post_max)
+	elif args.normalization_mode == 'sigmoid':
+		# Sharper sigmoid mapping; multiplies inputs by 4 before sigmoid
+		processed_tensor = torch.sigmoid(4.0 * torch.from_numpy(matrix)) #*4 because it makes the sigmoid steeper, pushing more values closer to 0 or 1. This seems intuitive to use up more of the bulk values in the desired range
+		processed = processed_tensor.cpu().numpy()
+		post_min = float(np.min(processed))
+		post_max = float(np.max(processed))
+		print("Sigmoid normalization stats:")
+		print("- Applied sigmoid(4*x) mapping")
+		print(f"- Final scalar range after sigmoid: [{post_min:.6f}, {post_max:.6f}]")
 		final_scalar_range = (post_min, post_max)
 
 	processed_mean = float(np.mean(processed))
