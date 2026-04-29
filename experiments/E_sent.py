@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from E_sent_eval import build_sentiment_samples, decode_predictions, compute_classification_loss
+from E_sent_eval import build_sentiment_samples, decode_predictions, compute_classification_loss, evaluate_model
 from E_sent_model import SequenceSentimentSNN
 from snn_util import spike_encode, get_neuron_beta_values_by_layer
 from readers import ReadSENTInputFile
@@ -45,6 +45,7 @@ parser.add_argument("--batch_size", type=int, default=32, help="Batch size for t
 parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs")
 parser.add_argument("--learning_rate", type=float, default=5e-4, help="Learning rate")
 parser.add_argument("--save", action="store_true", help="Whether to save the model checkpoint")
+parser.add_argument("--eval", action="store_true", help="Whether to evaluate the model")
 parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "output_results" / "E_sent"), help="Output directory for checkpoint and metadata")
 parser.add_argument("--diagnose", action="store_true", help="Run first-batch SNN diagnostics and generate plots")
 parser.add_argument(
@@ -382,6 +383,10 @@ for epoch in range(args.epochs):
         print(f"TTFS mean first spike time (fired output neurons): {epoch_mean_first_spike_time:.4f}")
 
 print("Training finished.")
+training_end_date = datetime.now()
+training_metadata["training_config"]["training_end_date"] = training_end_date.strftime("%Y-%m-%d %H:%M:%S")
+training_metadata["training_config"]["training_duration_s"] = (training_end_date - training_start_date).total_seconds()
+
 if args.diagnose:
     exit(0)
 
@@ -389,7 +394,6 @@ learned_beta_values_by_layer = None
 if args.learn_beta:
     learned_beta_values_by_layer = get_neuron_beta_values_by_layer(net) if args.learn_beta else None
     training_metadata["results"]["learned_beta_values_by_layer"] = learned_beta_values_by_layer
-
 
 if args.save:
     model_output_path = output_dir / f"{run_filename_base}.pt"
@@ -431,8 +435,20 @@ if args.save:
     torch.save(checkpoint, model_output_path)
     print(f"Model checkpoint saved to {model_output_path}")
 
-training_end_date = datetime.now()
-training_metadata["training_config"]["training_end_date"] = training_end_date.strftime("%Y-%m-%d %H:%M:%S")
-training_metadata["training_config"]["training_duration_s"] = (training_end_date - training_start_date).total_seconds()
+if args.eval:
+    args.model = net
+    args.x_data = X_test
+    args.y_data = y_test
+    args.model_config = training_metadata["training_config"]
+    args.cli_args = args
+    args.checkpoint = checkpoint if args.save else None
+    args.estimate_energy = False
+    results = evaluate_model(args)
+
+    training_metadata["results"]["test_loss"] = results["eval_loss"]
+    training_metadata["results"]["test_accuracy"] = results["eval_accuracy"]
+    training_metadata["results"]["test_ttfs_fallback_rate"] = results.get("eval_ttfs_fallback_rate", None)
+    training_metadata["results"]["test_ttfs_mean_first_spike_time"] = results.get("eval_ttfs_mean_first_spike_time", None)
+
 save_training_metadata(metadata_file, training_metadata)
 print(f"\nTraining metadata exported to {metadata_file}")

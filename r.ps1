@@ -1,13 +1,16 @@
 .\venv\Scripts\Activate.ps1
 
 # ---DATA PREP---
-# python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.50d.txt" --out_path="input_data\word_embeddings\glove\glove_50d.pkl" --normalization_mode "tanh"
 # python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.50d.txt" --out_path="input_data\word_embeddings\glove\glove_50d.pkl" --normalization_mode "sigmoid"
+# python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.25d.txt" --out_path="input_data\word_embeddings\glove\glove_25d.pkl" --normalization_mode "tanh"
+# python experiments/cast_embeddings.py --embeddings_path "input_data\word_embeddings\glove\glove.twitter.27B.100d.txt" --out_path="input_data\word_embeddings\glove\glove_100d.pkl" --normalization_mode "tanh"
 #rescale and L2 norm were giving unintuitive results with bad training performance, where the models didnt seem to learn at all
 # sigmoid is *4 because it makes the sigmoid steeper, pushing more values closer to 0 or 1. This seems intuitive to use up more of the bulk values in the desired range
 # sigmoid seems to perform the same as tanh, but might be faster to compute. I stick to tanh
 
-# python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10
+# python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10 --embeddings_path "input_data\word_embeddings\glove\glove_50d.pkl"
+# python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10 --embeddings_path "input_data\word_embeddings\glove\glove_25d.pkl"
+# python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10 --embeddings_path "input_data\word_embeddings\glove\glove_100d.pkl"
 # python experiments/cast_pos_input.py --min_sentence_length 5
 # python experiments/cast_ner_input.py
 
@@ -75,6 +78,9 @@ $epochs = 50
 # TODO FULL temporal setup, just to double check:
 # python experiments/E_sent.py --input_mode "temporal" --encoding_method "latency" --decoding_method "ttfs" --ttfs_temporal_loss "ce_temporal_loss" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "temporal_lat_ttfs_ce"
 
+# Phase 2 - other confounding variables - glove emb dim, neuron model
+# python experiments/E_sent.py --input_file_prefix "sent_d25" --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "lat_sc_25"
+# python experiments/E_sent.py --input_file_prefix "sent_d100" --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "lat_sc_100"
 
 
 # python experiments/E_pos.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --limit 1000 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 

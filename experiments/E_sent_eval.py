@@ -2,6 +2,7 @@ import argparse
 import json
 import time
 from pathlib import Path
+from argparse import Namespace
 
 import snntorch.functional as SF
 import torch
@@ -283,19 +284,44 @@ def evaluate_batches(
 	return avg_loss, avg_acc, fallback_rate, mean_first_spike_time, avg_ac_ops, avg_energy_pj
 
 
-def evaluate_model(args):
+def evaluate_model(args:Namespace) -> dict:
 	if args.limit is not None and args.limit <= 0:
 		raise ValueError("--limit must be a positive integer when provided")
 
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-	model_path = Path(args.model_path)
-	if not model_path.exists():
-		raise FileNotFoundError(f"Checkpoint not found: {model_path}")
+	provided_model = getattr(args, "model", None)
+	provided_x_data = getattr(args, "x_data", None)
+	provided_y_data = getattr(args, "y_data", None)
+	model_config = getattr(args, "model_config", {}) or {}
+	cli_args = getattr(args, "cli_args", {}) or {}
+	checkpoint = getattr(args, "checkpoint", {}) or {}
+	model_path = getattr(args, "model_path", None)
 
-	model, checkpoint = load_model_from_checkpoint(model_path, device)
-	model_config = checkpoint["model_config"]
-	cli_args = checkpoint.get("cli_args", {})
+	if provided_model is not None:
+		if provided_x_data is None or provided_y_data is None:
+			raise ValueError("When args.model is provided, args.x_data and args.y_data are also required")
+		model = provided_model.to(device)
+		model.eval()
+		X_eval = provided_x_data
+		y_eval = provided_y_data
+		if isinstance(model_config, dict) and not model_config and hasattr(model, "fc1") and hasattr(model.fc1, "in_features"):
+			model_config = {
+				"input_size": int(model.fc1.in_features),
+				"hidden_size_1": int(model.fc1.out_features),
+				"hidden_size_2": int(model.fc2.out_features),
+				"output_size": int(model.fc3.out_features),
+			}
+	else:
+		if model_path is None:
+			raise ValueError("Either args.model or args.model_path must be provided")
+		model_path = Path(model_path)
+		if not model_path.exists():
+			raise FileNotFoundError(f"Checkpoint not found: {model_path}")
+
+		model, checkpoint = load_model_from_checkpoint(model_path, device)
+		model_config = checkpoint["model_config"]
+		cli_args = checkpoint.get("cli_args", {})
 
 	input_mode = (args.input_mode or model_config.get("input_mode") or "spatial").lower()
 	encoding_method = (args.encoding_method or model_config.get("encoding_method") or "poisson").lower()
@@ -305,15 +331,27 @@ def evaluate_model(args):
 		or cli_args.get("ttfs_temporal_loss")
 		or "ce_temporal_loss"
 	).lower()
-	estimate_energy = bool(args.estimate_energy)
-	eac_pj = float(args.energy_ac_cost_pj)
+	estimate_energy = getattr(args, "estimate_energy", False)
+	eac_pj = getattr(args, "energy_ac_cost_pj", None)
 
 	batch_size = args.batch_size if args.batch_size is not None else int(cli_args.get("batch_size", 32))
 	sim_steps = args.sim_steps if args.sim_steps is not None else int(model_config.get("sim_steps", 20))
 
-	split_file = CAST_INPUT_DIR / f"{args.input_file_prefix}_{args.split}.pkl"
-	sent_data, embedding_dim = ReadSENTInputFile(split_file, limit=args.limit)
-	X_eval, y_eval = build_sentiment_samples(sent_data, embedding_dim)
+	if provided_model is None:
+		split_file = CAST_INPUT_DIR / f"{args.input_file_prefix}_{args.split}.pkl"
+		sent_data, embedding_dim = ReadSENTInputFile(split_file, limit=args.limit)
+		X_eval, y_eval = build_sentiment_samples(sent_data, embedding_dim)
+	else:
+		X_eval = provided_x_data
+		y_eval = provided_y_data
+		if args.limit is not None:
+			X_eval = X_eval[: args.limit]
+			y_eval = y_eval[: args.limit]
+		if not isinstance(X_eval, torch.Tensor):
+			X_eval = torch.as_tensor(X_eval)
+		if not isinstance(y_eval, torch.Tensor):
+			y_eval = torch.as_tensor(y_eval)
+		embedding_dim = int(X_eval.shape[-1]) if X_eval.ndim >= 2 else None
 
 	# Optional diagnostics: plot spike rasters and output-layer membrane for first sample
 	if getattr(args, "diagnose", False):
@@ -329,7 +367,7 @@ def evaluate_model(args):
 		plt.show()
 		return
 
-	if int(model_config.get("embedding_dim", embedding_dim)) != int(embedding_dim):
+	if provided_model is None and int(model_config.get("embedding_dim", embedding_dim)) != int(embedding_dim):
 		raise ValueError(
 			f"Embedding dim mismatch between data and checkpoint: data={embedding_dim}, checkpoint={model_config.get('embedding_dim')}"
 		)
@@ -337,7 +375,7 @@ def evaluate_model(args):
 	sequence_length = int(X_eval.shape[1])
 	expected_input_size = sequence_length * embedding_dim if input_mode == "spatial" else embedding_dim
 	checkpoint_input_size = int(model_config.get("input_size", expected_input_size))
-	if expected_input_size != checkpoint_input_size:
+	if provided_model is None and expected_input_size != checkpoint_input_size:
 		raise ValueError(
 			"Input size mismatch between evaluation data and checkpoint config: "
 			f"data={expected_input_size}, checkpoint={checkpoint_input_size}"
@@ -360,13 +398,13 @@ def evaluate_model(args):
 		loss_fn,
 		ttfs_loss_fn,
 		estimate_energy=estimate_energy,
-		eac_pj=eac_pj,
+		eac_pj=eac_pj or None,
 	)
 	eval_time_ms = (time.perf_counter() - eval_start) * 1000.0
 
-	results = model_config | {
-		"model_path": str(model_path),
-		"split": args.split,
+	results = dict(model_config) | {
+		"model_source": "args.model" if provided_model is not None else "model_path",
+		"model_path": str(model_path) if model_path is not None else None,
 		"samples": int(X_eval.shape[0]),
 		"batch_size": int(batch_size),
 		"eval_time_ms": float(eval_time_ms),
@@ -383,7 +421,7 @@ def evaluate_model(args):
 		results["avg_energy_nj_per_sample"] = float(test_avg_energy_pj / 1000.0)
 
 	print(
-		f"Evaluation | split={results['split']} | samples={results['samples']} "
+		f"Evaluation | samples={results['samples']} "
 		f"| loss={results['eval_loss']:.4f} | acc={results['eval_accuracy']:.4f} "
 		f"| eval_time_ms={results['eval_time_ms']:.2f}"
 	)
@@ -394,7 +432,7 @@ def evaluate_model(args):
 		print(f"Average AC operations per sample: {results['avg_ac_operations_per_sample']:.2f}")
 		print(f"Average energy per sample: {results['avg_energy_pj_per_sample']:.2f} pJ ({results['avg_energy_nj_per_sample']:.4f} nJ)")
 
-	if args.output_json:
+	if getattr(args, "output_json", False):
 		output_json = Path(args.output_json)
 		output_json.parent.mkdir(parents=True, exist_ok=True)
 		with open(output_json, "w", encoding="utf-8") as handle:
