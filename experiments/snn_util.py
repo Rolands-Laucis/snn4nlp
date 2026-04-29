@@ -102,6 +102,20 @@ def get_neuron_beta_values_by_layer(
 
     return beta_values
 
+def parse_threshold_layer_scalars(raw_value):
+	if raw_value is None:
+		return []
+	if isinstance(raw_value, (list, tuple)):
+		values = [float(v) for v in raw_value]
+	elif isinstance(raw_value, str):
+		stripped = raw_value.strip().strip("[]")
+		values = [float(v.strip()) for v in stripped.split(",") if v.strip()]
+	else:
+		raise ValueError("threshold_layer_scalars must be list/tuple/str")
+
+	if len(values) != 3:
+		raise ValueError(f"threshold_layer_scalars must have exactly 3 values. Got: {values}")
+	return values
 
 def main() -> None:
     """Run a tiny spike encoding demo when this file is executed directly."""

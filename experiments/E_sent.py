@@ -6,13 +6,14 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import snntorch as snn
-from snntorch import utils
 import snntorch.functional as SF
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from snn_util import build_neuron_layer, spike_encode, get_neuron_beta_values_by_layer
+from E_sent_eval import build_sentiment_samples, decode_predictions, compute_classification_loss
+from E_sent_model import SequenceSentimentSNN
+from snn_util import spike_encode, get_neuron_beta_values_by_layer
 from readers import ReadSENTInputFile
 from snn_diagnostics import collect_forward_diagnostics
 from snn_diagnostics import plot_layer_membrane_traces
@@ -44,7 +45,6 @@ parser.add_argument("--batch_size", type=int, default=32, help="Batch size for t
 parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs")
 parser.add_argument("--learning_rate", type=float, default=5e-4, help="Learning rate")
 parser.add_argument("--save", action="store_true", help="Whether to save the model checkpoint")
-parser.add_argument("--eval", action="store_true", help="Whether to evaluate the model")
 parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "output_results" / "E_sent"), help="Output directory for checkpoint and metadata")
 parser.add_argument("--diagnose", action="store_true", help="Run first-batch SNN diagnostics and generate plots")
 parser.add_argument(
@@ -69,185 +69,6 @@ alpha = args.alpha if args.alpha is not None else args.beta
 
 args.threshold_layer_scalars = list(map(float, map(str.strip, args.threshold_layer_scalars.strip("[]").split(","))))
 # print(f"Parsed threshold_layer_scalars: {args.threshold_layer_scalars}")
-
-def build_sentiment_samples(samples, embedding_dim):
-    """
-    Convert sentiment samples into tensors.
-
-    Expected sample structure: [padded_sequence_embeddings, binary_label]
-      - padded_sequence_embeddings: list of token embeddings
-      - binary_label: 0/1, bool, or sentiment string
-    """
-    x_list = []
-    y_list = []
-
-    for sample_idx, sample in enumerate(samples):
-        if not isinstance(sample, (list, tuple)) or len(sample) < 2:
-            raise ValueError(f"Invalid sample format at index {sample_idx}: expected [sequence_embeddings, binary_label]")
-
-        token_embeddings = sample[0]
-        label_value = sample[1]
-        # print(sample_idx, label_value)
-
-        if not token_embeddings:
-            raise ValueError(f"Empty token embedding sequence at sample index {sample_idx}")
-
-        seq_embeddings = []
-        for token_idx, token_embedding in enumerate(token_embeddings):
-            embedding = torch.as_tensor(token_embedding, dtype=torch.float32)
-            if embedding.ndim != 1 or embedding.numel() != embedding_dim:
-                raise ValueError(
-                    "Embedding dimension mismatch "
-                    f"at sample {sample_idx}, token {token_idx}: expected {embedding_dim}, got {embedding.numel()}"
-                )
-            seq_embeddings.append(embedding)
-
-        if label_value not in (0, 1):
-            raise ValueError(f"Label must be exactly 0 or 1. Got: {label_value} at sample index {sample_idx}")
-
-        x_list.append(torch.stack(seq_embeddings, dim=0))
-        y_list.append(int(label_value))
-
-    if not x_list:
-        raise ValueError("No valid samples were produced for sentiment training.")
-
-    X = torch.stack(x_list, dim=0)  # [num_samples, seq_len, embedding_dim]
-    y = torch.tensor(y_list, dtype=torch.long)
-    print(f"Built sentiment samples | X shape: {X.shape} | y shape: {y.shape}")
-    return X, y
-
-
-class SequenceSentimentSNN(nn.Module):
-    """Predict binary sentiment from sequence embeddings."""
-
-    def __init__(self, input_size, hidden_size_1, hidden_size_2, output_size, neuron_model_name):
-        super().__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size_1)
-        self.lif1 = build_neuron_layer(neuron_model_name, beta=args.beta, alpha=args.alpha, threshold=args.threshold, threshold_layer_scalar=args.threshold_layer_scalars[0])
-        self.fc2 = nn.Linear(hidden_size_1, hidden_size_2)
-        self.lif2 = build_neuron_layer(neuron_model_name, beta=args.beta, alpha=args.alpha, threshold=args.threshold, threshold_layer_scalar=args.threshold_layer_scalars[1])
-        self.fc3 = nn.Linear(hidden_size_2, output_size)
-        self.lif3 = build_neuron_layer(neuron_model_name, beta=args.beta, alpha=args.alpha, threshold=args.threshold, threshold_layer_scalar=args.threshold_layer_scalars[2])
-
-    def forward(self, spike_seq, track_ttfs=False):
-        num_steps = spike_seq.shape[0]
-        batch_size = spike_seq.shape[1]
-        output_size = self.fc3.out_features
-
-        spk3_sum = torch.zeros(batch_size, output_size, device=spike_seq.device, dtype=spike_seq.dtype)
-        first_spike_idx = None
-        has_fired = None
-        ttfs_spk_rec = None
-        if track_ttfs:
-            first_spike_idx = torch.full(
-                (batch_size, output_size),
-                float(num_steps + 1),
-                device=spike_seq.device,
-                dtype=spike_seq.dtype,
-            )
-            has_fired = torch.zeros((batch_size, output_size), device=spike_seq.device, dtype=torch.bool)
-            ttfs_spk_rec = []
-
-        final_mem = torch.zeros(batch_size, output_size, device=spike_seq.device, dtype=spike_seq.dtype)
-
-        neuron_class1 = self.lif1.__class__.__name__
-        neuron_class2 = self.lif2.__class__.__name__
-        neuron_class3 = self.lif3.__class__.__name__
-
-        mem1 = torch.zeros(batch_size, self.fc1.out_features, device=spike_seq.device, dtype=spike_seq.dtype)
-        mem2 = torch.zeros(batch_size, self.fc2.out_features, device=spike_seq.device, dtype=spike_seq.dtype)
-        mem3 = torch.zeros(batch_size, output_size, device=spike_seq.device, dtype=spike_seq.dtype)
-
-        syn1 = None
-        syn2 = None
-        syn3 = None
-
-        if neuron_class1 in ("Synaptic", "QLIF"):
-            syn1 = torch.zeros(batch_size, self.fc1.out_features, device=spike_seq.device, dtype=spike_seq.dtype)
-        if neuron_class2 in ("Synaptic", "QLIF"):
-            syn2 = torch.zeros(batch_size, self.fc2.out_features, device=spike_seq.device, dtype=spike_seq.dtype)
-        if neuron_class3 in ("Synaptic", "QLIF"):
-            syn3 = torch.zeros(batch_size, output_size, device=spike_seq.device, dtype=spike_seq.dtype)
-
-        for step in range(num_steps):
-            cur1 = self.fc1(spike_seq[step])
-            if neuron_class1 in ("Synaptic", "QLIF"):
-                spk1, syn1, mem1 = self.lif1(cur1, syn1, mem1)
-            else:
-                spk1, mem1 = self.lif1(cur1, mem1)
-
-            cur2 = self.fc2(spk1)
-            if neuron_class2 in ("Synaptic", "QLIF"):
-                spk2, syn2, mem2 = self.lif2(cur2, syn2, mem2)
-            else:
-                spk2, mem2 = self.lif2(cur2, mem2)
-
-            cur3 = self.fc3(spk2)
-            if neuron_class3 in ("Synaptic", "QLIF"):
-                spk3, syn3, mem3 = self.lif3(cur3, syn3, mem3)
-            else:
-                spk3, mem3 = self.lif3(cur3, mem3)
-
-            spk3_sum += spk3
-            final_mem = mem3
-
-            if track_ttfs:
-                ttfs_spk_rec.append(spk3)
-                spk3_fired = spk3 > 0
-                new_fired = spk3_fired & (~has_fired)
-                first_spike_idx[new_fired] = float(step)
-                has_fired = has_fired | spk3_fired
-                if torch.all(has_fired):
-                    break
-
-        if track_ttfs:
-            sample_has_spike = has_fired.any(dim=1)
-            ttfs_spk_rec = torch.stack(ttfs_spk_rec, dim=0)
-            return spk3_sum, first_spike_idx, sample_has_spike, final_mem, ttfs_spk_rec
-
-        return spk3_sum
-
-
-def decode_predictions(spike_counts, decoding_method="spike_count", first_spike_idx=None, sample_has_spike=None, final_mem=None):
-    if decoding_method == "spike_count":
-        preds = torch.argmax(spike_counts, dim=1)
-        return preds, 0
-
-    if decoding_method == "ttfs":
-        if first_spike_idx is None or sample_has_spike is None:
-            raise ValueError("first_spike_idx and sample_has_spike are required for TTFS decoding")
-
-        preds = torch.argmin(first_spike_idx, dim=1)
-
-        all_silent = ~sample_has_spike
-        fallback_count = int(all_silent.sum().item())
-        if fallback_count:
-            if final_mem is None:
-                raise ValueError("final_mem is required when TTFS fallback is needed")
-            mem_fallback = torch.argmax(final_mem, dim=1)
-            preds = torch.where(all_silent, mem_fallback, preds)
-
-        return preds, fallback_count
-
-    raise ValueError("decoding_method must be either 'spike_count' or 'ttfs'")
-
-
-def compute_classification_loss(
-    spike_count_loss_function,
-    ttfs_loss_function,
-    targets,
-    decoding_method="spike_count",
-    spike_counts=None,
-    ttfs_spk_rec=None,
-):
-    if decoding_method == "ttfs":
-        if ttfs_spk_rec is None:
-            raise ValueError("ttfs_spk_rec is required for TTFS loss")
-        return ttfs_loss_function(ttfs_spk_rec, targets)
-
-    if spike_counts is None:
-        raise ValueError("spike_counts is required for spike_count loss")
-    return spike_count_loss_function(spike_counts, targets)
 
 
 def save_training_metadata(metadata_path, metadata):
@@ -294,7 +115,17 @@ print(f"Class balance (train): neg={train_negative}, pos={train_positive}")
 print(f"Class balance (test): neg={test_negative}, pos={test_positive}")
 
 input_size = sequence_length * embedding_dim if input_mode == "spatial" else embedding_dim
-net = SequenceSentimentSNN(input_size, args.num_hidden_1, args.num_hidden_2, num_labels, neuron_model)
+net = SequenceSentimentSNN(
+    input_size,
+    args.num_hidden_1,
+    args.num_hidden_2,
+    num_labels,
+    neuron_model,
+    beta=args.beta,
+    alpha=args.alpha,
+    threshold=args.threshold,
+    threshold_layer_scalars=args.threshold_layer_scalars,
+)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 net = net.to(device)
@@ -559,95 +390,6 @@ if args.learn_beta:
     learned_beta_values_by_layer = get_neuron_beta_values_by_layer(net) if args.learn_beta else None
     training_metadata["results"]["learned_beta_values_by_layer"] = learned_beta_values_by_layer
 
-if args.eval:
-    def evaluate_model(model, features, labels, batch_size, device, n_steps):
-        eval_ds = TensorDataset(features, labels)
-        eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False)
-        model.eval()
-
-        running_loss = 0.0
-        running_correct = 0
-        running_total = 0
-        running_fallback = 0
-        running_first_spike_time_sum = 0.0
-        running_first_spike_time_count = 0
-
-        with torch.no_grad():
-            for xb, yb in eval_loader:
-                # model reset is handled by init_hidden=False in neuron layers, so no explicit reset needed here.
-                xb = xb.to(device)
-                yb = yb.to(device)
-
-                spike_seq = spike_encode(
-                    xb,
-                    n_steps,
-                    input_mode=input_mode,
-                    encoding_method=encoding_method
-                ).to(device)
-                need_ttfs_state = decoding_method == "ttfs"
-                model_output = model(spike_seq, track_ttfs=need_ttfs_state)
-                if need_ttfs_state:
-                    spike_counts, first_spike_idx, sample_has_spike, final_mem, ttfs_spk_rec = model_output
-                else:
-                    spike_counts = model_output
-                    first_spike_idx = None
-                    sample_has_spike = None
-                    final_mem = None
-                    ttfs_spk_rec = None
-
-                loss = compute_classification_loss(
-                    loss_fn,
-                    ttfs_loss_fn,
-                    yb,
-                    decoding_method=decoding_method,
-                    spike_counts=spike_counts,
-                    ttfs_spk_rec=ttfs_spk_rec,
-                )
-
-                running_loss += loss.item() * xb.size(0)
-                preds, fallback_count = decode_predictions(
-                    spike_counts,
-                    decoding_method=decoding_method,
-                    first_spike_idx=first_spike_idx,
-                    sample_has_spike=sample_has_spike,
-                    final_mem=final_mem,
-                )
-                running_correct += (preds == yb).sum().item()
-                running_total += xb.size(0)
-                running_fallback += fallback_count
-
-                if need_ttfs_state and first_spike_idx is not None:
-                    fired_mask = first_spike_idx <= float(spike_seq.shape[0])
-                    running_first_spike_time_sum += float(first_spike_idx[fired_mask].sum().item())
-                    running_first_spike_time_count += int(fired_mask.sum().item())
-
-                utils.reset(model)
-
-        avg_loss = running_loss / max(1, running_total)
-        avg_acc = running_correct / max(1, running_total)
-        fallback_rate = running_fallback / max(1, running_total)
-        mean_first_spike_time = running_first_spike_time_sum / max(1, running_first_spike_time_count)
-        return avg_loss, avg_acc, fallback_rate, mean_first_spike_time
-
-    test_loss, test_acc, test_ttfs_fallback_rate, test_ttfs_mean_first_spike_time = evaluate_model(
-        net,
-        X_test,
-        y_test,
-        args.batch_size,
-        device,
-        args.sim_steps,
-    )
-    print(f"Test evaluation | loss: {test_loss:.4f} | acc: {test_acc:.4f}")
-    if decoding_method == "ttfs":
-        print(f"Test TTFS fallback rate: {test_ttfs_fallback_rate:.4f}")
-        print(f"Test TTFS mean first spike time (fired output neurons): {test_ttfs_mean_first_spike_time:.4f}")
-
-
-    training_metadata["results"]["test_loss"] = float(test_loss)
-    training_metadata["results"]["test_accuracy"] = float(test_acc)
-    training_metadata["results"]["test_ttfs_fallback_rate"] = float(test_ttfs_fallback_rate)
-    training_metadata["results"]["test_ttfs_mean_first_spike_time"] = float(test_ttfs_mean_first_spike_time)
-
 
 if args.save:
     model_output_path = output_dir / f"{run_filename_base}.pt"
@@ -678,10 +420,10 @@ if args.save:
             "epoch_train_accuracy": epoch_accuracies,
             "epoch_ttfs_fallback_rate": epoch_ttfs_fallback_rates,
             "epoch_ttfs_mean_first_spike_time": epoch_ttfs_mean_first_spike_times,
-            "test_loss": float(test_loss),
-            "test_accuracy": float(test_acc),
-            "test_ttfs_fallback_rate": float(test_ttfs_fallback_rate),
-            "test_ttfs_mean_first_spike_time": float(test_ttfs_mean_first_spike_time),
+            "test_loss": training_metadata["results"]["test_loss"],
+            "test_accuracy": training_metadata["results"]["test_accuracy"],
+            "test_ttfs_fallback_rate": training_metadata["results"]["test_ttfs_fallback_rate"],
+            "test_ttfs_mean_first_spike_time": training_metadata["results"]["test_ttfs_mean_first_spike_time"],
             "learned_beta_values_by_layer": learned_beta_values_by_layer,
         },
         "cli_args": vars(args),

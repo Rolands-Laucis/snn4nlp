@@ -69,14 +69,18 @@ $epochs = 50
 # for the sake of computational cost, will use spatial input for the rest of the experiments, as it trains much faster, and has higher train accuracy
 
 
-# spatial wins; vary encoding and decoding method for spatial input
-# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs 3 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size $batch_size 
-# python experiments/E_sent.py --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --epochs 3 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size $batch_size 
-# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --save --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size 
-# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "ttfs" --ttfs_temporal_loss "ce_temporal_loss" --save --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size 
-# ON GPU:
-# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "ttfs" --ttfs_temporal_loss "mse_temporal_loss" --save --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size 
+# spatial wins; vary encoding and decoding method
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "lat_sc"
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "ttfs" --ttfs_temporal_loss "ce_temporal_loss" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "lat_ttfs_ce"
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "ttfs" --ttfs_temporal_loss "mse_temporal_loss" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "lat_ttfs_mse"
+# TODO FULL temporal setup, just to double check:
+# python experiments/E_sent.py --input_mode "temporal" --encoding_method "latency" --decoding_method "ttfs" --ttfs_temporal_loss "ce_temporal_loss" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "temporal_lat_ttfs_ce"
 
+# diagnose plots of full models
+# python experiments/E_sent_eval.py --diagnose --model_path "output_results\E_sent\main\lat_sc_2026-04-28_13-42-47_e-50_s-25_spatial.pt" --encoding_method "latency" --decoding_method "spike_count" --limit 1 --sim_steps $sim_steps 
+python experiments/E_sent_eval.py --diagnose --model_path "output_results\E_sent\main\lat_ttfs_ce_2026-04-28_13-58-26_e-50_s-25_spatial.pt" --encoding_method "latency" --decoding_method "ttfs" --limit 1 --sim_steps $sim_steps 
+python experiments/E_sent_eval.py --diagnose --model_path "output_results\E_sent\main\sent_2026-04-28_10-13-09_e-50_s-25_spatial.pt" --encoding_method "poisson" --decoding_method "spike_count" --limit 1 --sim_steps $sim_steps 
+python experiments/E_sent_eval.py --diagnose --model_path "output_results\E_sent\main\sent_2026-04-28_10-30-42_e-50_s-25_temporal.pt" --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --limit 1 --sim_steps $sim_steps 
 
 # python experiments/E_pos.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 20 --limit 1000 --encoding_method "latency" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
 # python experiments/E_pos.py --input_mode "temporal" --epochs 50 --beta 0.95 --sim_steps 50 --limit 1000 --encoding_method "latency" --ttfs_temporal_loss "ce_temporal_loss" --decoding_method "ttfs" --output_file_prefix "tmp_ttfs" 
