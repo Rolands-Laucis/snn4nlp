@@ -95,7 +95,7 @@ if False:
 
 
 #load word embeddings
-embeddings, embedding_dim, emb_scalar_range = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
+embeddings, embedding_dim, emb_scalar_range, normalization_mode = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
 print('Embeddings:', len(embeddings.keys()), 'Dimension:', embedding_dim, 'Embedding scalar range:', emb_scalar_range)
 
 unk_vector = GetEmbeddingUnkVector(embeddings, embedding_dim)
@@ -154,6 +154,7 @@ for dataset in datasets.keys():
         'embeddings_path_used': str(EMBEDDINGS_PATH),
         'embedding_dim': embedding_dim,
         'embedding_scalar_range': emb_scalar_range,
+        "embeddings_normalization_mode": normalization_mode
     }
     with metadata_path.open('w', encoding='utf-8') as out_meta:
         json.dump(metadata, out_meta, indent=2)

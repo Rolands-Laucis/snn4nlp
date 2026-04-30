@@ -339,7 +339,7 @@ def evaluate_model(args:Namespace) -> dict:
 
 	if provided_model is None:
 		split_file = CAST_INPUT_DIR / f"{args.input_file_prefix}_{args.split}.pkl"
-		sent_data, embedding_dim = ReadSENTInputFile(split_file, limit=args.limit)
+		sent_data, embedding_dim, emb_normalization_mode = ReadSENTInputFile(split_file, limit=args.limit)
 		X_eval, y_eval = build_sentiment_samples(sent_data, embedding_dim)
 	else:
 		X_eval = provided_x_data

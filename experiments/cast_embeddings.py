@@ -122,7 +122,7 @@ if embeddings:
 		print("Sigmoid normalization stats:")
 		print("- Applied sigmoid(4*x) mapping")
 		print(f"- Final scalar range after sigmoid: [{post_min:.6f}, {post_max:.6f}]")
-		final_scalar_range = (post_min, post_max)
+		final_scalar_range = (round(post_min, 6), round(post_max, 6))
 
 	processed_mean = float(np.mean(processed))
 	processed_median = float(np.median(processed))
@@ -136,6 +136,6 @@ else:
 output_path = Path(args.out_path)
 output_path.parent.mkdir(parents=True, exist_ok=True)
 with output_path.open('wb') as f:
-	pickle.dump((embeddings, dim, final_scalar_range), f, protocol=pickle.HIGHEST_PROTOCOL)
+	pickle.dump((embeddings, dim, final_scalar_range, args.normalization_mode), f, protocol=pickle.HIGHEST_PROTOCOL)
 
 print(f"Saved cast embeddings to {output_path}")

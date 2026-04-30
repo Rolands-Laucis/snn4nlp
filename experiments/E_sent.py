@@ -77,8 +77,8 @@ def save_training_metadata(metadata_path, metadata):
         json.dump(metadata, handle, indent=2)
 
 
-sent_train_data, embedding_dim = ReadSENTInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_train.pkl", limit=args.limit)
-sent_test_data, _ = ReadSENTInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_test.pkl", limit=args.limit)
+sent_train_data, embedding_dim, emb_normalization_mode = ReadSENTInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_train.pkl", limit=args.limit)
+sent_test_data, _, emb_normalization_mode = ReadSENTInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_test.pkl", limit=args.limit)
 print(len(sent_train_data), len(sent_test_data), embedding_dim)
 # print(set(s[1] for s in sent_test_data))
 # exit(0)

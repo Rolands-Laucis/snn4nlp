@@ -2,6 +2,7 @@ from tqdm import tqdm
 from pathlib import Path
 import pickle
 from typing import Any, Sequence, TYPE_CHECKING
+import json
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -95,7 +96,7 @@ def ReadRawEmbeddingsFile(path: str, limit: int | None = None) -> tuple[Embeddin
     return embeddings, len(embeddings.keys()), embedding_dim
 
 def ReadPickledEmbeddingsFile(path: str, limit: int | None = None) -> tuple[Embeddings, tuple[float, float] | None, int]:
-    """Read pickled embeddings from (dict, dim, scalar_range) payloads."""
+    """Read pickled embeddings from (dict, dim, scalar_range, normalization_mode) payloads."""
     file_path = Path(path)
     with file_path.open('rb') as f:
         payload: Any = pickle.load(f)
@@ -121,7 +122,7 @@ def ReadPickledEmbeddingsFile(path: str, limit: int | None = None) -> tuple[Embe
     if isinstance(scalar_range_raw, (tuple, list)) and len(scalar_range_raw) == 2:
         scalar_range = (float(scalar_range_raw[0]), float(scalar_range_raw[1]))
 
-    return embeddings, int(embedding_dim), scalar_range
+    return embeddings, int(embedding_dim), scalar_range, payload[3] if len(payload) > 3 else None
 
 def ReadUPOSInputFile(path: str, limit: int | None = None) -> tuple[list[Any], int]:
     """Read pickled UPOS model input and infer embedding dimension."""
@@ -172,8 +173,14 @@ def ReadParquetFile(path: str, limit: int | None = None) -> "pd.DataFrame":
 def ReadSENTInputFile(path: str, limit: int | None = None) -> tuple[list[Any], int]:
     """Read pickled sentence-classification input and infer embedding size."""
     file_path = Path(path)
+    meta_path = Path(path).with_suffix('.metadata.json')
     with file_path.open('rb') as f:
         sentences: list[Any] = pickle.load(f)
+
+    with meta_path.open('r') as f:
+        metadata = json.load(f)
+        embedding_dim = metadata.get('embedding_dim', 0)
+        normalization_mode = metadata.get('embeddings_normalization_mode', None)
 
     if limit is not None:
         sentences = sentences[:limit]
@@ -182,10 +189,10 @@ def ReadSENTInputFile(path: str, limit: int | None = None) -> tuple[list[Any], i
         embedding_dim = len(sentences[0][0][0])
     else:
         embedding_dim = 0
-    return sentences, int(embedding_dim)
+    return sentences, int(embedding_dim), normalization_mode
 
 # if __name__ == "__main__":
-#     sent, emb = ReadSENTInputFile('input_data\cast_sent\sent_d50_dev.pkl')
+#     sent, emb, emb_normalization_mode = ReadSENTInputFile('input_data\cast_sent\sent_d50_dev.pkl')
 #     label_tags = [
 #         sentence[1]
 #         for sentence in sent
