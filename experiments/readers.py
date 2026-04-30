@@ -177,10 +177,11 @@ def ReadSENTInputFile(path: str, limit: int | None = None) -> tuple[list[Any], i
     with file_path.open('rb') as f:
         sentences: list[Any] = pickle.load(f)
 
-    with meta_path.open('r') as f:
-        metadata = json.load(f)
-        embedding_dim = metadata.get('embedding_dim', 0)
-        normalization_mode = metadata.get('embeddings_normalization_mode', None)
+    normalization_mode = None
+    if meta_path.exists():
+        with meta_path.open('r') as f:
+            metadata = json.load(f)
+            normalization_mode = metadata.get('embeddings_normalization_mode', None)
 
     if limit is not None:
         sentences = sentences[:limit]
