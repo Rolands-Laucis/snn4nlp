@@ -96,7 +96,7 @@ if False:
 
 #load word embeddings
 embeddings, embedding_dim, emb_scalar_range, normalization_mode = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
-print('Embeddings:', len(embeddings.keys()), 'Dimension:', embedding_dim, 'Embedding scalar range:', emb_scalar_range)
+print('Embeddings:', len(embeddings.keys()), 'Dimension:', embedding_dim, 'Embedding scalar range:', emb_scalar_range, 'Normalization mode:', normalization_mode)
 
 unk_vector = GetEmbeddingUnkVector(embeddings, embedding_dim)
 
