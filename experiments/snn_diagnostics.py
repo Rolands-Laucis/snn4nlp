@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from colors import colors
 
 import matplotlib.pyplot as plt
 import torch
@@ -219,7 +220,7 @@ def plot_layer_spike_trains(
         if spike_points.numel() > 0:
             time_idx = spike_points[:, 0].numpy()
             neuron_idx = spike_points[:, 1].numpy()
-            ax.scatter(time_idx, neuron_idx, s=point_size, marker=".", alpha=1, linewidths=0)
+            ax.scatter(time_idx, neuron_idx, s=point_size, marker=".", alpha=1, linewidths=0, color=colors.spike_dot)
 
         ax.set_title(f"{layer_name}: spike train raster (sample={sample_index})")
         ax.set_xlabel("time step")
@@ -263,14 +264,14 @@ def plot_neuron_membrane_trace(
     if ax is None:
         _, ax = plt.subplots(figsize=(10, 4))
 
-    ax.plot(steps, mem_trace, linewidth=1.8, label="membrane potential")
+    ax.plot(steps, mem_trace, linewidth=1.8, label="membrane potential", color=colors.trace_line)
     ax.axhline(layer.threshold, linestyle="--", linewidth=1.2, label=f"threshold={layer.threshold:.3f}")
 
     if include_spike_markers:
         spike_times = [t for t, val in enumerate(spk_trace) if val > 0]
         if spike_times:
             spike_values = [mem_trace[t] for t in spike_times]
-            ax.scatter(spike_times, spike_values, s=24, c="red", label="spike")
+            ax.scatter(spike_times, spike_values, s=24, c=colors.spike, label="spike")
 
     ax.set_title(
         f"{layer_name} neuron {neuron_index}: membrane vs threshold (sample={sample_index})"
