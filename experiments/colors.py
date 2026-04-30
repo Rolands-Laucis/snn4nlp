@@ -1,5 +1,6 @@
 from argparse import Namespace
 
+# https://matplotlib.org/stable/gallery/color/named_colors.html
 colors = Namespace(**{
     'train_accuracy': "royalblue",
     'test_accuracy': "blueviolet",
