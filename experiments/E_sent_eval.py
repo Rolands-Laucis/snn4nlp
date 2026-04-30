@@ -412,6 +412,7 @@ def evaluate_model(args:Namespace) -> dict:
 		"eval_accuracy": float(test_acc),
 		"ttfs_fallback_rate": float(test_ttfs_fallback_rate),
 		"ttfs_mean_first_spike_time": float(test_ttfs_mean_first_spike_time),
+		"emb_normalization_mode": emb_normalization_mode if provided_model is None else None,
 	}
 
 	if estimate_energy:

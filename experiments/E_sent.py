@@ -168,6 +168,7 @@ training_metadata = {
         "training_duration_s": None,
         "task": "token_level_binary_sentiment",
         "embedding_dim": int(embedding_dim),
+        "embedding_normalization_mode": emb_normalization_mode,
         "sequence_length": int(sequence_length),
         "input_size": int(input_size),
         "num_labels": num_labels,
