@@ -224,6 +224,7 @@ def plot_layer_spike_trains(
         ax.set_title(f"{layer_name}: spike train raster (sample={sample_index})")
         ax.set_xlabel("time step")
         ax.set_ylabel("neuron id")
+        ax.set_xlim(-0.5, spikes.shape[0] - 0.5)
         ax.set_ylim(-0.5, sample_spikes.shape[1] - 0.5)
         ax.grid(True, alpha=0.25)
 
@@ -276,6 +277,7 @@ def plot_neuron_membrane_trace(
     )
     ax.set_xlabel("time step")
     ax.set_ylabel("membrane potential")
+    ax.set_xlim(-0.5, mem.shape[0] - 0.5)
     ax.grid(True, alpha=0.25)
     if show_legend:
         ax.legend(loc="best")
