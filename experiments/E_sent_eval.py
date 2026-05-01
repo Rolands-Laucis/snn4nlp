@@ -183,6 +183,7 @@ def load_model_from_checkpoint(model_path, device):
 		hidden_size_2=int(model_config["hidden_size_2"]),
 		output_size=int(model_config["output_size"]),
 		neuron_model_name=model_config.get("neuron_model", cli_args.get("neuron_model", "lif")),
+		# these params shouldnt matter here, because its loading the state dict anyway:
 		beta=model_config.get("beta", cli_args.get("beta")),
 		alpha=model_config.get("alpha", cli_args.get("alpha")),
 		threshold=cli_args.get("threshold"),

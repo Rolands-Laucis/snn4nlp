@@ -15,18 +15,20 @@ class SequenceSentimentSNN(nn.Module):
         output_size,
         neuron_model_name,
         beta=None,
+        learn_beta=False,
         alpha=None,
+        learn_alpha=False,
         threshold=None,
         threshold_layer_scalars=None,
     ):
         super().__init__()
         scalars = threshold_layer_scalars or [1.0, 0.8, 0.7]
         self.fc1 = nn.Linear(input_size, hidden_size_1)
-        self.lif1 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[0])
+        self.lif1 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[0], learn_beta=learn_beta, learn_alpha=learn_alpha)
         self.fc2 = nn.Linear(hidden_size_1, hidden_size_2)
-        self.lif2 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[1])
+        self.lif2 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[1], learn_beta=learn_beta, learn_alpha=learn_alpha)
         self.fc3 = nn.Linear(hidden_size_2, output_size)
-        self.lif3 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[2])
+        self.lif3 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[2], learn_beta=learn_beta, learn_alpha=learn_alpha)
 
     def forward(self, spike_seq, track_ttfs=False):
         num_steps = spike_seq.shape[0]

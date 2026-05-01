@@ -36,6 +36,7 @@ parser.add_argument("--decoding_method", type=str, default="spike_count", choice
 parser.add_argument("--ttfs_temporal_loss", type=str, default="ce_temporal_loss", choices=["ce_temporal_loss", "mse_temporal_loss"], help="Temporal loss used when decoding_method=ttfs")
 parser.add_argument("--neuron_model", type=str, default="lif", choices=["lif", "synaptic", "qlif"], help="Neuron model to use [lif|synaptic|qlif]")
 parser.add_argument("--alpha", type=float, default=None, help="Synaptic decay factor for second-order neurons; defaults to beta when omitted")
+parser.add_argument("--learn_alpha", type=bool, default=False, help="Whether to learn the alpha parameter")
 parser.add_argument("--beta", type=float, default=None, help="Leaky neuron decay factor. None for learning or random init (0..1 recommended)")
 parser.add_argument("--learn_beta", type=bool, default=False, help="Whether to learn the beta parameter")
 parser.add_argument("--threshold", type=float, default=None, help="Leaky neuron threshold factor. None for learning or random init (0..1 recommended)")
@@ -124,6 +125,8 @@ net = SequenceSentimentSNN(
     neuron_model,
     beta=args.beta,
     alpha=args.alpha,
+    learn_alpha=args.learn_alpha,
+    learn_beta=args.learn_beta,
     threshold=args.threshold,
     threshold_layer_scalars=args.threshold_layer_scalars,
 )
@@ -228,7 +231,8 @@ print(f"  Batch size: {args.batch_size}")
 print(f"  Epochs: {args.epochs}")
 print(f"  Learning rate: {args.learning_rate}")
 print(f"  Total learnable parameters: {total_params}")
-
+print(f"  Save: {args.save}")
+print(f"  Eval: {args.eval}")
 
 # Train (samples are shuffled by DataLoader each epoch)
 epoch_losses = []

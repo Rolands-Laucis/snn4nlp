@@ -5,7 +5,8 @@ import numpy as np
 from typing import Literal
 from snntorch.spikegen import latency
 
-BetaValue = float | list[float]
+BetaValues = list[float] | list[list[float]] | list[list[list[float]]]
+LayerBetaStats = dict[str, BetaValues | float]
 
 def spike_encode(
     batch_sequence_embeddings: torch.Tensor,
@@ -66,6 +67,7 @@ def build_neuron_layer(
     alpha: float = np.random.rand(),
     threshold: float = np.random.rand(),
     learn_beta: bool = False,
+    learn_alpha: bool = False,
     learn_threshold: bool = False,
     threshold_layer_scalar: float = 1.0,
 ) -> torch.nn.Module:
@@ -74,31 +76,29 @@ def build_neuron_layer(
     if model_name == "lif":
         return snn.Leaky(beta=beta or np.random.rand(), threshold=(threshold or np.random.rand()) * threshold_layer_scalar, init_hidden=False, learn_beta=learn_beta, learn_threshold=learn_threshold)
     if model_name == "synaptic":
-        return snn.Synaptic(alpha=alpha or np.random.rand(), beta=beta or np.random.rand(), threshold=(threshold or np.random.rand()) * threshold_layer_scalar, init_hidden=False, learn_alpha=True, learn_beta=learn_beta, learn_threshold=learn_threshold)
+        return snn.Synaptic(alpha=alpha or np.random.rand(), beta=beta or np.random.rand(), threshold=(threshold or np.random.rand()) * threshold_layer_scalar, init_hidden=False, learn_alpha=learn_alpha, learn_beta=learn_beta, learn_threshold=learn_threshold, reset_mechanism="zero")
     if model_name == "qlif":
-        return QLIF(alpha=alpha or np.random.rand(), beta=beta or np.random.rand(), threshold=(threshold or np.random.rand()) * threshold_layer_scalar, init_hidden=False, learn_alpha=True, learn_beta=learn_beta, learn_threshold=learn_threshold)
+        return QLIF(alpha=alpha or np.random.rand(), beta=beta or np.random.rand(), threshold=(threshold or np.random.rand()) * threshold_layer_scalar, init_hidden=False, learn_alpha=learn_alpha, learn_beta=learn_beta, learn_threshold=learn_threshold, reset_mechanism="zero")
     raise ValueError("--neuron_model must be one of: lif, synaptic, qlif")
 
 def get_neuron_beta_values_by_layer(
     model: torch.nn.Module,
     layer_names: tuple[str, ...] = ("lif1", "lif2", "lif3"),
-) -> dict[str, BetaValue]:
-    """Extract per-layer beta values for available neuron layers."""
-    beta_values: dict[str, BetaValue] = {}
+) -> dict[str, LayerBetaStats]:
+    """Extract per-layer beta values and their mean for available neuron layers."""
+    beta_values: dict[str, LayerBetaStats] = {}
     for layer_name in layer_names:
         layer = getattr(model, layer_name, None)
         if layer is None or not hasattr(layer, "beta"):
             continue
 
         beta_value = layer.beta
-        if torch.is_tensor(beta_value):
-            beta_value = beta_value.detach().cpu().reshape(-1).tolist()
-            if len(beta_value) == 1:
-                beta_value = beta_value[0]
-        elif hasattr(beta_value, "item"):
-            beta_value = beta_value.item()
-
-        beta_values[layer_name] = beta_value
+        beta_tensor = beta_value if torch.is_tensor(beta_value) else torch.as_tensor(beta_value)
+        beta_tensor = beta_tensor.detach().cpu()
+        beta_values[layer_name] = {
+            "values": beta_tensor.tolist(),
+            "mean": float(beta_tensor.float().mean().item()),
+        }
 
     return beta_values
 
