@@ -35,6 +35,7 @@ parser.add_argument("--encoding_method", type=str, default="poisson", choices=["
 parser.add_argument("--decoding_method", type=str, default="spike_count", choices=["spike_count", "ttfs"], help="Output decoding method [spike_count|ttfs]")
 parser.add_argument("--ttfs_temporal_loss", type=str, default="ce_temporal_loss", choices=["ce_temporal_loss", "mse_temporal_loss"], help="Temporal loss used when decoding_method=ttfs")
 parser.add_argument("--neuron_model", type=str, default="lif", choices=["lif", "synaptic", "qlif"], help="Neuron model to use [lif|synaptic|qlif]")
+parser.add_argument("--per_neuron_params", type=bool, default=False, help="Whether to learn parameters for each neuron individually")
 parser.add_argument("--alpha", type=float, default=None, help="Synaptic decay factor for second-order neurons; defaults to beta when omitted")
 parser.add_argument("--learn_alpha", type=bool, default=False, help="Whether to learn the alpha parameter")
 parser.add_argument("--beta", type=float, default=None, help="Leaky neuron decay factor. None for learning or random init (0..1 recommended)")
@@ -129,6 +130,7 @@ net = SequenceSentimentSNN(
     learn_beta=args.learn_beta,
     threshold=args.threshold,
     threshold_layer_scalars=args.threshold_layer_scalars,
+    per_neuron_params=args.per_neuron_params
 )
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

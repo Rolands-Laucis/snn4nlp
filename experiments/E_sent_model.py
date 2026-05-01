@@ -20,15 +20,17 @@ class SequenceSentimentSNN(nn.Module):
         learn_alpha=False,
         threshold=None,
         threshold_layer_scalars=None,
+        per_neuron_params=False,
     ):
         super().__init__()
         scalars = threshold_layer_scalars or [1.0, 0.8, 0.7]
         self.fc1 = nn.Linear(input_size, hidden_size_1)
-        self.lif1 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[0], learn_beta=learn_beta, learn_alpha=learn_alpha)
+        # the beta and alpha params are either a scalar for all neurons sharing the same value or a tensor of shape (hidden_size,) for per-neuron values, and are passed to build_neuron_layer which handles both cases
+        self.lif1 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[0], learn_beta=learn_beta, learn_alpha=learn_alpha, per_neuron_params=per_neuron_params, num_neurons=hidden_size_1)
         self.fc2 = nn.Linear(hidden_size_1, hidden_size_2)
-        self.lif2 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[1], learn_beta=learn_beta, learn_alpha=learn_alpha)
+        self.lif2 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[1], learn_beta=learn_beta, learn_alpha=learn_alpha, per_neuron_params=per_neuron_params, num_neurons=hidden_size_2)
         self.fc3 = nn.Linear(hidden_size_2, output_size)
-        self.lif3 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[2], learn_beta=learn_beta, learn_alpha=learn_alpha)
+        self.lif3 = build_neuron_layer(neuron_model_name, beta=beta, alpha=alpha, threshold=threshold, threshold_layer_scalar=scalars[2], learn_beta=learn_beta, learn_alpha=learn_alpha, per_neuron_params=per_neuron_params, num_neurons=output_size)
 
     def forward(self, spike_seq, track_ttfs=False):
         num_steps = spike_seq.shape[0]

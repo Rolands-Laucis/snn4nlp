@@ -70,15 +70,30 @@ def build_neuron_layer(
     learn_alpha: bool = False,
     learn_threshold: bool = False,
     threshold_layer_scalar: float = 1.0,
+    per_neuron_params: bool = False,
+    num_neurons: int = 1,
 ) -> torch.nn.Module:
     """Construct a configured spiking neuron layer by model name."""
     model_name = model_name.lower()
+    
+    if per_neuron_params:
+        betas = torch.rand(num_neurons) if beta is None else torch.full((num_neurons,), beta)
+    else:
+        betas = beta or np.random.rand() #fallback to random scalar if beta was None and per_neuron_params is False
+
+    if per_neuron_params:
+        alphas = torch.rand(num_neurons) if alpha is None else torch.full((num_neurons,), alpha)
+    else:
+        alphas = alpha or np.random.rand() #fallback to random scalar if alpha was None and per_neuron_params is False
+
+    threshold = (threshold or np.random.rand()) * threshold_layer_scalar
+
     if model_name == "lif":
-        return snn.Leaky(beta=beta or np.random.rand(), threshold=(threshold or np.random.rand()) * threshold_layer_scalar, init_hidden=False, learn_beta=learn_beta, learn_threshold=learn_threshold)
+        return snn.Leaky(beta=betas, threshold=threshold, init_hidden=False, learn_beta=learn_beta, learn_threshold=learn_threshold)
     if model_name == "synaptic":
-        return snn.Synaptic(alpha=alpha or np.random.rand(), beta=beta or np.random.rand(), threshold=(threshold or np.random.rand()) * threshold_layer_scalar, init_hidden=False, learn_alpha=learn_alpha, learn_beta=learn_beta, learn_threshold=learn_threshold, reset_mechanism="zero")
+        return snn.Synaptic(alpha=alphas, beta=betas, threshold=threshold, init_hidden=False, learn_alpha=learn_alpha, learn_beta=learn_beta, learn_threshold=learn_threshold, reset_mechanism="zero")
     if model_name == "qlif":
-        return QLIF(alpha=alpha or np.random.rand(), beta=beta or np.random.rand(), threshold=(threshold or np.random.rand()) * threshold_layer_scalar, init_hidden=False, learn_alpha=learn_alpha, learn_beta=learn_beta, learn_threshold=learn_threshold, reset_mechanism="zero")
+        return QLIF(alpha=alphas, beta=betas, threshold=threshold, init_hidden=False, learn_alpha=learn_alpha, learn_beta=learn_beta, learn_threshold=learn_threshold, reset_mechanism="zero")
     raise ValueError("--neuron_model must be one of: lif, synaptic, qlif")
 
 def get_neuron_beta_values_by_layer(
@@ -95,9 +110,10 @@ def get_neuron_beta_values_by_layer(
         beta_value = layer.beta
         beta_tensor = beta_value if torch.is_tensor(beta_value) else torch.as_tensor(beta_value)
         beta_tensor = beta_tensor.detach().cpu()
+        beta_list = beta_tensor.reshape(-1).tolist()
         beta_values[layer_name] = {
-            "values": beta_tensor.tolist(),
-            "mean": float(beta_tensor.float().mean().item()),
+            "values": beta_list,
+            "mean": float(torch.tensor(beta_list, dtype=torch.float32).mean().item()),
         }
 
     return beta_values

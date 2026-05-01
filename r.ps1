@@ -55,7 +55,7 @@ $batch_size = 32
 $epochs = 50
 
 # tests
-# python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --save --epochs 10 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --output_file_prefix "sigmoid"
+python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 1 --beta $beta --learn_beta True --per_neuron_params True --sim_steps $sim_steps --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --limit 1000 --learning_rate $lr --batch_size 64 --output_file_prefix "hypr-3"
 
 
 # ---PHASE 1 - INPUT MODE---
