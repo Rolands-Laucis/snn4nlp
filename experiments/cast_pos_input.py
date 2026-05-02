@@ -68,6 +68,17 @@ for dataset in datasets.keys():
             serialized_sentence.append(word_info + vector) # [lemma, upos, xpos, embd_1, embd_2, ..., embd_n]
         serialized_sentences.append(serialized_sentence)
 
+    # sanity check: print the first serialized sentence
+    # if serialized_sentences:
+    #     print(f"First serialized sentence for {dataset}:")
+    #     sent = serialized_sentences[0]
+    #     print(f"{dataset} 0th: {datasets[dataset][0]}", len(datasets[dataset][0]))
+    #     print(f"serialized_sentences 0th: {[s[:3] for s in sent]}", len(sent))
+
+    #     for word_info in sent[:3]: #print the first 3 words of the first serialized sentence
+    #         print(word_info[:3], "Embedding sample:", word_info[3:6]) #print lemma, upos, xpos and first 5 dimensions of the embedding
+    # exit(0)
+
     with output_path.open('wb') as out:
         pickle.dump(serialized_sentences, out, protocol=pickle.HIGHEST_PROTOCOL)
 

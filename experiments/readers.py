@@ -36,7 +36,7 @@ def ReadConlluFile(
                             sentences.append(words)
                         words = []
                     annots = line.split('\t')
-                    words.append([annots[0].lower()] + annots[3:5]) #NOTE lowercase the word to better match the embeddings, and only keep the word and UPOS tag
+                    words.append([annots[1].lower()] + annots[3:5]) #NOTE lowercase the word to better match the embeddings, and only keep the word and UPOS tag
                     prev_num = current_num
                 except (ValueError, IndexError):
                     pass
