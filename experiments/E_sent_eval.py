@@ -100,7 +100,10 @@ def get_ttfs_loss(loss_name):
 
 
 def estimate_batch_ac_operations(model, spike_seq):
-	"""Estimate AC operations for one batch using the model's feedforward path."""
+	"""Estimate AC operations for one batch using the model's feedforward path.
+	Assumes the model has a structure of fc1/lif1/fc2/lif2/fc3/lif3 and that spike_seq is [T, B, input_size].
+	AC operations are estimated by counting per sample incoming spikes to each layer and multiplying by the number of synapses (output features), assuming all neurons are fully connected between layers.
+	"""
 	if spike_seq.ndim != 3:
 		raise ValueError(f"spike_seq must be rank-3 [T, B, input_size], got shape: {tuple(spike_seq.shape)}")
 
@@ -356,7 +359,6 @@ def evaluate_model(args:Namespace) -> dict:
 
 	# Optional diagnostics: plot spike rasters and output-layer membrane for first sample
 	if getattr(args, "diagnose", False):
-		print("Running diagnostics for first evaluation sample...")
 		first_x = X_eval[:1]
 		spike_seq = spike_encode(first_x, sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
 		diagnostics = collect_forward_diagnostics(model, spike_seq)
