@@ -12,7 +12,7 @@
 # python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10 --embeddings_path "input_data\word_embeddings\glove\glove_25d_sigmoid.pkl"
 # python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
 
-# python experiments/cast_pos_input.py --min_sentence_length 5
+# python experiments/cast_pos_input.py --min_sentence_length 5 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
 # python experiments/cast_ner_input.py
 
 
@@ -55,7 +55,7 @@ $batch_size = 32
 $epochs = 50
 
 # tests
-python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 1 --beta $beta --learn_beta True --per_neuron_params True --sim_steps $sim_steps --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --limit 1000 --learning_rate $lr --batch_size 64 --output_file_prefix "hypr-3"
+# python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 1 --beta $beta --learn_beta True --per_neuron_params True --sim_steps $sim_steps --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --limit 1000 --learning_rate $lr --batch_size 64 --output_file_prefix "hypr-3"
 
 
 # ---PHASE 1 - INPUT MODE---
@@ -64,14 +64,18 @@ python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" 
 # temporal mode is quite less accurate in train, but the test score is very close to train for both tanh and sigmoid, meaning it prob generalizes better than spatial mode.
 # need to test, if other hyper params would improve it:
 
-# TODO on sigmoid:
 # foreach ($sim_steps in @(15, 20, 25, 30, 40)) {
 #     Write-Host "Running phase-1-B with sim_steps=$sim_steps beta=$beta"
 
 #     python experiments/E_sent.py --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --epochs 10 --beta $beta --learn_beta True --sim_steps $sim_steps --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --limit 1000 --learning_rate $lr --batch_size 64 --output_file_prefix "hypr-3"
 # }
-# the best accuracy is still with sim_steps=25, and learning beta doesn't seem to help much, as the learned beta values are all close to the initial value of 0.9, so will keep it fixed at 0.9 for all runs.
+# the best accuracy is with sim_steps=20 and 30, but not 25, and learning beta at 0.95, which means it probably tries to keep all past context right to the end.
 # for the sake of computational cost, will use spatial input for the rest of the experiments, as it trains much faster, and has higher train accuracy
+
+# ---PHASE 1 - ANN equivalent---
+# python experiments/E_sent_ann.py --input_file_prefix "sent_d50" --output_file_prefix "ann_50d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+# python experiments/E_sent_ann.py --input_file_prefix "sent_d25" --output_file_prefix "ann_25d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+# python experiments/E_sent_ann.py --input_file_prefix "sent_d100" --output_file_prefix "ann_100d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
 
 
 # ---PHASE 1 - ENCODING AND DECODING---
@@ -86,7 +90,14 @@ python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" 
 # python experiments/E_sent.py --input_file_prefix "sent_d25" --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "lat_sc_25"
 # python experiments/E_sent.py --input_file_prefix "sent_d100" --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "lat_sc_100"
 
+# python experiments/E_sent.py --diagnose --input_file_prefix "sent_d25" --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --neuron_model "synaptic" --output_file_prefix "lat_sc_100_synaptic" --per_neuron_params True --learn_alpha True --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64
+# python experiments/E_sent.py --input_file_prefix "sent_d100" --neuron_model "qlif" --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --output_file_prefix "lat_sc_100_qlif" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval
+# python experiments/E_sent.py --input_file_prefix "sent_d100" --neuron_model "synaptic" --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --output_file_prefix "lat_sc_100_synaptic" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval
+# synaptic does really well and achieves 99% train acc in the first 20 epochs with learn alpha false
+# qlif is slightly worse than lif
+# python experiments/E_sent.py --input_file_prefix "sent_d100" --neuron_model "synaptic" --learn_alpha True --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --output_file_prefix "lat_sc_100_synaptic_learn" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval
 
 # ---PHASE 3 - NLP tasks---
-# python experiments/E_pos.py --input_mode "spatial" --epochs 50 --beta 0.9 --sim_steps 40 --limit 1000 --encoding_method "poisson" --decoding_method "spike_count" --output_file_prefix "tmp_pois"
+# python experiments/E_pos.py --input_mode "spatial" --encoding_method "latency" --output_file_prefix "tmp_pos" --epochs 10 --beta $beta --sim_steps $sim_steps --limit 2000 --learning_rate $lr --batch_size 64
+python experiments/E_pos.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "tmp_pos" --epochs $epochs --beta $beta --sim_steps $sim_steps --learning_rate $lr --batch_size $batch_size
 # for POS also test spatial vs temporal input with shuffled token order in eval on trained models to see if either degrades and by how much, which would indicate whether temporal actually inputs token order implicitly
