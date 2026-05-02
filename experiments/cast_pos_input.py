@@ -33,13 +33,13 @@ print(vars(args))
 UD_train, _ = ReadConlluFile(UD_DIR / 'en_ewt-ud-train.conllu', min_sentence_length=args.min_sentence_length, max_sentence_length=args.max_sentence_length, limit=args.limit)
 UD_dev, _ = ReadConlluFile(UD_DIR / 'en_ewt-ud-dev.conllu', min_sentence_length=args.min_sentence_length, max_sentence_length=args.max_sentence_length, limit=args.limit)
 UD_test, _ = ReadConlluFile(UD_DIR / 'en_ewt-ud-test.conllu', min_sentence_length=args.min_sentence_length, max_sentence_length=args.max_sentence_length, limit=args.limit)  # Limit to 1000 sentences for testing
-print(len(UD_train), len(UD_dev), len(UD_test))
+UD_train += UD_dev  # Combine train and dev for training
+del UD_dev  # Remove dev set as it's now part of train
+print(len(UD_train), len(UD_test))
 
 #load word embeddings
-embeddings, embd_count, embedding_range, embedding_dim = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
-print('Embeddings:', embd_count, 'Dimension:', embedding_dim)
-if embedding_range is not None:
-    print('Embedding scalar range:', embedding_range)
+embeddings, embedding_dim, embedding_range, emb_normalization_mode = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
+print('Embeddings:', len(embeddings), 'Dimension:', embedding_dim, 'Embedding scalar range:', embedding_range, 'Normalization mode:', emb_normalization_mode)
 
 unk_vector = GetEmbeddingUnkVector(embeddings, embedding_dim)
 
@@ -48,9 +48,9 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 datasets = {
     'train': UD_train,
-    'dev': UD_dev,
     'test': UD_test
 }
+# exports the pickle in the format of [[lemma, upos, xpos, embd_1, embd_2, ..., embd_n], ...]
 for dataset in datasets.keys():
     output_path = OUT_DIR / f'pos_d{embedding_dim}_{dataset}.pkl'
     metadata_path = OUT_DIR / f'pos_d{embedding_dim}_{dataset}.metadata.json'
@@ -62,10 +62,10 @@ for dataset in datasets.keys():
             break
 
         serialized_sentence = []
-        for word_info in sentence:
-            word = word_info[0]
-            vector = embeddings.get(word, unk_vector)
-            serialized_sentence.append(word_info + vector)
+        for word_info in sentence: #word_info is a list of the form [lemma, upos, xpos]
+            word = word_info[0] #lemma
+            vector = embeddings.get(word, unk_vector) #embedding
+            serialized_sentence.append(word_info + vector) # [lemma, upos, xpos, embd_1, embd_2, ..., embd_n]
         serialized_sentences.append(serialized_sentence)
 
     with output_path.open('wb') as out:

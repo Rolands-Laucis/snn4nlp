@@ -125,7 +125,9 @@ def ReadPickledEmbeddingsFile(path: str, limit: int | None = None) -> tuple[Embe
     return embeddings, int(embedding_dim), scalar_range, payload[3] if len(payload) > 3 else None
 
 def ReadUPOSInputFile(path: str, limit: int | None = None) -> tuple[list[Any], int]:
-    """Read pickled UPOS model input and infer embedding dimension."""
+    """Read pickled UPOS model input and infer embedding dimension.
+        sentences are in the format of [[lemma, upos, xpos, embd_1, embd_2, ..., embd_n], ...]
+    """
     file_path = Path(path)
     with file_path.open('rb') as f:
         sentences: list[Any] = pickle.load(f)
