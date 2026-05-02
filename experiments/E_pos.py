@@ -94,6 +94,16 @@ X_train, y_train = build_pos_samples(sent_train_data, embedding_dim, label_to_id
 # print('building test samples...')
 X_test, y_test = build_pos_samples(sent_test_data, embedding_dim, label_to_idx, window_size=CONTEXT_WINDOW_SIZE)
 
+# sanity check
+# sample_idx = 0
+# sample_x = X_train[sample_idx]  # [window_size, embedding_dim]
+# sample_y = y_train[sample_idx].item()
+# print("Sample label:", idx_to_label[sample_y])
+# print("Window shape:", sample_x.shape)
+# for pos in range(sample_x.shape[0]):
+#     print(f"pos {pos}: first 8 dims = {sample_x[pos, :8].tolist()}")
+# exit(0)
+
 if args.limit is not None:
     train_limit = min(args.limit, X_train.shape[0])
     test_limit = min(args.limit, X_test.shape[0])
@@ -108,6 +118,10 @@ sequence_length = X_train.shape[1]
 train_class_counts = torch.bincount(y_train, minlength=num_labels)
 test_class_counts = torch.bincount(y_test, minlength=num_labels)
 
+# compute samples for each label in the training and test sets (after building samples)
+# train_samples_per_label = [torch.where(y_train == i)[0] for i in range(num_labels)]
+# test_samples_per_label = [torch.where(y_test == i)[0] for i in range(num_labels)]
+
 print(f"Training samples: {X_train.shape[0]}")
 print(f"Testing samples: {X_test.shape[0]}")
 print(f"X_train shape: {X_train.shape}  # [samples, window_len, embed_dim]")
@@ -116,6 +130,8 @@ print(f"POS tag count: {num_labels}")
 print(f"Class count (train): {len(train_class_counts.tolist())}")
 print(f"Class count (test): {len(test_class_counts.tolist())}")
 print(f"POS tags: {pos_tags}")
+print(f"Train class distribution: {train_class_counts.tolist()}")
+print(f"Test class distribution: {test_class_counts.tolist()}")
 
 input_size = sequence_length * embedding_dim if input_mode == "spatial" else embedding_dim
 net = SequencePOS_SNN(
@@ -139,7 +155,10 @@ net = net.to(device)
 train_ds = TensorDataset(X_train, y_train)
 train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
 
-loss_fn = nn.CrossEntropyLoss()
+class_weights = torch.zeros(num_labels)
+for i in range(num_labels):
+    class_weights[i] = X_train.shape[0] / (num_labels * train_class_counts[i])
+loss_fn = nn.CrossEntropyLoss(weight=class_weights) # Use class weights to handle class imbalance in the training data
 optimizer = torch.optim.Adam(net.parameters(), lr=args.learning_rate)
 
 total_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
@@ -248,6 +267,12 @@ for epoch in range(args.epochs):
             input_mode=input_mode,
             encoding_method=encoding_method
         ).to(device)
+        # print(f"Spike sequence shape: {spike_seq.shape}  # [sim_steps, batch_size, input_size]")
+        # tmp = spike_seq[:, 0, :]
+        # a = tmp.cpu().numpy()[0]
+        # for j,i in enumerate(tmp[1:]):
+        #     print(j, a == i.cpu().numpy())
+        # exit(0)
 
         if args.diagnose and not diagnostics_ran:
             with torch.no_grad():

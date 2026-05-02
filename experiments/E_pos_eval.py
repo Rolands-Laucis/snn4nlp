@@ -32,17 +32,17 @@ def build_pos_samples(
     labels = []
 
     for sentence in sentences:
-        for i in range(len(sentence)):
+        sent_len = len(sentence)
+        for i in range(sent_len):
             window = []
-            for j in range(i - pad, i + pad + 1):
-                if j < 0 or j >= len(sentence):
+            for j in range(i - pad, i + pad + 1): #for the current word at position i, we want to include pad words before and after, so the window is from i-pad to i+pad inclusive
+                if j < 0 or j >= sent_len: #if those positions are out of bounds (sentence overhangs), we add a padding vector (unk_vec)
                     window.append(unk_vec)
                 else:
-                    token = sentence[j]
-                    emb = token[3:] if len(token) > 3 else unk_vec
-                    window.append(emb)
+                    word_info = sentence[j]
+                    window.append(word_info[3:]) # Assuming embedding vector starts at index 3
 
-            target_tag = sentence[i][1] if len(sentence[i]) > 1 else None
+            target_tag = sentence[i][1] if len(sentence[i]) > 1 else None #UPOS tag of the i-th word_info
             if target_tag is None or target_tag not in label_to_idx:
                 continue
 

@@ -56,9 +56,26 @@ class SequencePOS_SNN(nn.Module):
             learn_alpha=learn_alpha,
             learn_beta=learn_beta,
             learn_threshold=learn_threshold,
+            reset_mechanism="zero",
         )
-        self.lif2 = snn.Synaptic(alpha=alpha_2, beta=beta_2, threshold=thr2, learn_alpha=learn_alpha, learn_beta=learn_beta, learn_threshold=learn_threshold)
-        self.lif3 = snn.Synaptic(alpha=alpha_3, beta=beta_3, threshold=thr3, learn_alpha=learn_alpha, learn_beta=learn_beta, learn_threshold=learn_threshold)
+        self.lif2 = snn.Synaptic(
+            alpha=alpha_2,
+            beta=beta_2,
+            threshold=thr2,
+            learn_alpha=learn_alpha,
+            learn_beta=learn_beta,
+            learn_threshold=learn_threshold,
+            reset_mechanism="zero",
+        )
+        self.lif3 = snn.Synaptic(
+            alpha=alpha_3,
+            beta=beta_3,
+            threshold=thr3,
+            learn_alpha=learn_alpha,
+            learn_beta=learn_beta,
+            learn_threshold=learn_threshold,
+            reset_mechanism="zero",
+        )
 
     def forward(self, spike_seq, track_ttfs: bool = False):
         syn1, mem1 = self.lif1.init_synaptic()

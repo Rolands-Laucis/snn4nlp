@@ -98,6 +98,16 @@ $epochs = 50
 # python experiments/E_sent.py --input_file_prefix "sent_d100" --neuron_model "synaptic" --learn_alpha True --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --output_file_prefix "lat_sc_100_synaptic_learn" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval
 
 # ---PHASE 3 - NLP tasks---
-# python experiments/E_pos.py --input_mode "spatial" --encoding_method "latency" --output_file_prefix "tmp_pos" --epochs 10 --beta $beta --sim_steps $sim_steps --limit 2000 --learning_rate $lr --batch_size 64
-python experiments/E_pos.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "tmp_pos" --epochs $epochs --beta $beta --sim_steps $sim_steps --learning_rate $lr --batch_size $batch_size
+# hyper params
+foreach ($sim_steps in @(15, 20, 25, 30, 40)) {
+    foreach ($beta in @(0.5, 0.75, 0.9, 0.95, 0.99)) {
+        $alpha = [math]::Round($beta/1.1, 2)
+        Write-Host "Running phase-0-A with sim_steps=$sim_steps beta=$beta alpha=$alpha"
+
+        python experiments/E_pos.py --input_mode "spatial" --encoding_method "latency" --output_file_prefix "upos_hypr-1" --epochs 5 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64 --threshold_layer_scalars "[1,1,1]"
+    }
+}
+
+# python experiments/E_pos.py --diagnose --input_mode "spatial" --encoding_method "latency" --output_file_prefix "diag" --epochs 5 --beta $beta --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64 # --threshold_layer_scalars $threshold_layer_scalars
+# python experiments/E_pos.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "upos" --epochs $epochs --beta $beta --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --threshold_layer_scalars $threshold_layer_scalars
 # for POS also test spatial vs temporal input with shuffled token order in eval on trained models to see if either degrades and by how much, which would indicate whether temporal actually inputs token order implicitly
