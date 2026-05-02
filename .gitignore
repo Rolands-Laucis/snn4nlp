@@ -6,6 +6,8 @@ input_data/**/*.*
 output_results/**/*.*
 !output_results/**/.gitkeep
 
+experiments/diagnose.ipynb
+
 # Created by https://www.toptal.com/developers/gitignore/api/venv,python,visualstudiocode
 # Edit at https://www.toptal.com/developers/gitignore?templates=venv,python,visualstudiocode
 
