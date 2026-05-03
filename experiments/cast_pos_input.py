@@ -1,3 +1,5 @@
+import random
+
 from readers import ReadConlluFile, ReadPickledEmbeddingsFile, GetEmbeddingUnkVector
 from pathlib import Path
 from tqdm import tqdm
@@ -33,12 +35,17 @@ print(vars(args))
 UD_train, _ = ReadConlluFile(UD_DIR / 'en_ewt-ud-train.conllu', min_sentence_length=args.min_sentence_length, max_sentence_length=args.max_sentence_length, limit=args.limit)
 UD_dev, _ = ReadConlluFile(UD_DIR / 'en_ewt-ud-dev.conllu', min_sentence_length=args.min_sentence_length, max_sentence_length=args.max_sentence_length, limit=args.limit)
 UD_test, _ = ReadConlluFile(UD_DIR / 'en_ewt-ud-test.conllu', min_sentence_length=args.min_sentence_length, max_sentence_length=args.max_sentence_length, limit=args.limit)  # Limit to 1000 sentences for testing
-UD_train += UD_dev  # Combine train and dev for training
+# combine and shuffle and split
+UD_train += UD_dev + UD_test
 del UD_dev  # Remove dev set as it's now part of train
+random.shuffle(UD_train) # shuffle
+cut = int(0.8 * len(UD_train))
+UD_test = UD_train[cut:]  # 20% for testing
+UD_train = UD_train[:cut]  # 80% for training
 print(len(UD_train), len(UD_test))
 
 #load word embeddings
-embeddings, embedding_dim, embedding_range, emb_normalization_mode = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH, limit=args.limit)
+embeddings, embedding_dim, embedding_range, emb_normalization_mode = ReadPickledEmbeddingsFile(EMBEDDINGS_PATH)
 print('Embeddings:', len(embeddings), 'Dimension:', embedding_dim, 'Embedding scalar range:', embedding_range, 'Normalization mode:', emb_normalization_mode)
 
 unk_vector = GetEmbeddingUnkVector(embeddings, embedding_dim)
