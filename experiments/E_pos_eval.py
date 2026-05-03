@@ -1,6 +1,7 @@
 from typing import Any
 import json
 import time
+import argparse
 from argparse import Namespace
 from pathlib import Path
 
@@ -10,7 +11,9 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from E_pos_model import SequencePOS_SNN
 from readers import ReadUPOSInputFile
-from snn_util import spike_encode
+from snn_util import spike_encode, parse_threshold_layer_scalars
+from snn_diagnostics import collect_forward_diagnostics, plot_layer_spike_trains, plot_layer_membrane_traces
+import matplotlib.pyplot as plt
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAST_INPUT_DIR = PROJECT_ROOT / "input_data" / "cast_pos"
@@ -21,6 +24,7 @@ def build_pos_samples(
     embedding_dim: int,
     label_to_idx: dict[str, int],
     window_size: int = 5,
+    shuffle_window: bool = False,  # Special test condition: shuffle context window word order
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if window_size < 1 or window_size % 2 == 0:
         raise ValueError("window_size must be an odd integer >= 1")
@@ -41,6 +45,11 @@ def build_pos_samples(
                 else:
                     word_info = sentence[j]
                     window.append(word_info[3:]) # Assuming embedding vector starts at index 3
+
+            # Special test condition: shuffle the context window word order after construction
+            if shuffle_window:
+                import random
+                random.shuffle(window)
 
             target_tag = sentence[i][1] if len(sentence[i]) > 1 else None #UPOS tag of the i-th word_info
             if target_tag is None or target_tag not in label_to_idx:
@@ -159,6 +168,8 @@ def evaluate_batches(
     running_ac_ops = 0.0
     running_energy_pj = 0.0
 
+    # print(f"Evaluating on {len(eval_ds)} samples with batch_size={batch_size} and n_steps={n_steps}...")
+
     with torch.no_grad():
         for xb, yb in eval_loader:
             xb = xb.to(device)
@@ -166,7 +177,7 @@ def evaluate_batches(
 
             spike_seq = spike_encode(
                 xb,
-                n_steps,
+                n_steps=n_steps,
                 input_mode=input_mode,
                 encoding_method=encoding_method,
             ).to(device)
@@ -191,6 +202,30 @@ def evaluate_batches(
     return avg_loss, avg_acc, avg_ac_ops, avg_energy_pj
 
 
+def load_model_from_checkpoint(model_path, device):
+    checkpoint = torch.load(model_path, map_location=device)
+    if "model_state_dict" not in checkpoint or "model_config" not in checkpoint:
+        raise ValueError("Checkpoint is missing required keys: model_state_dict/model_config")
+
+    model_config = checkpoint["model_config"]
+    cli_args = checkpoint.get("cli_args", {})
+
+    threshold_layer_scalars = parse_threshold_layer_scalars(cli_args.get("threshold_layer_scalars"))
+    model = SequencePOS_SNN(
+        input_size=int(model_config["input_size"]),
+        hidden_size_1=int(model_config["hidden_size_1"]),
+        hidden_size_2=int(model_config["hidden_size_2"]),
+        output_size=int(model_config["output_size"]),
+        beta=model_config.get("beta", cli_args.get("beta")),
+        alpha=model_config.get("alpha", cli_args.get("alpha")),
+        threshold=cli_args.get("threshold"),
+        threshold_layer_scalars=threshold_layer_scalars,
+    )
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model = model.to(device)
+    model.eval()
+    return model, checkpoint
+
 def evaluate_model(args: Namespace) -> dict:
     if args.limit is not None and args.limit <= 0:
         raise ValueError("--limit must be a positive integer when provided")
@@ -198,13 +233,15 @@ def evaluate_model(args: Namespace) -> dict:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = getattr(args, "model", None)
+    model_path = getattr(args, "model_path", None)
     x_data = getattr(args, "x_data", None)
     y_data = getattr(args, "y_data", None)
+    limit = getattr(args, "limit", None)
 
     if model is None:
-        raise ValueError("args.model, args.x_data, and args.y_data are required for POS evaluation")
-    if x_data is None or y_data is None:
-        raise ValueError("args.x_data and args.y_data are required")
+        if model_path is None:
+            raise ValueError("Either args.model or args.model_path must be provided")
+        model, _ = load_model_from_checkpoint(model_path, device)
 
     model = model.to(device)
     model.eval()
@@ -216,19 +253,55 @@ def evaluate_model(args: Namespace) -> dict:
     estimate_energy = getattr(args, "estimate_energy", False)
     eac_pj = getattr(args, "energy_ac_cost_pj", 25.63)
 
+    print(f"Evaluating model", model_path, 'Limit:', limit)
+
+    # If x/y data are not provided, load the cast POS input file and build samples
+    if x_data is None or y_data is None:
+        input_file_prefix = getattr(args, "input_file_prefix", "pos_d100")
+        split = getattr(args, "split", "test")
+
+        split_file = CAST_INPUT_DIR / f"{input_file_prefix}_{split}.pkl"
+        if not split_file.exists():
+            raise FileNotFoundError(f"POS input file not found: {split_file}")
+
+        sentences, embedding_dim = ReadUPOSInputFile(split_file, limit=limit)
+
+        # build label mapping from data
+        tags = set()
+        for sent in sentences:
+            for token in sent:
+                if len(token) > 1:
+                    tags.add(token[1])
+        label_to_idx = {tag: i for i, tag in enumerate(sorted(tags))}
+
+        window_size = getattr(args, "window_size", 5)
+        shuffle_window = getattr(args, "shuffle_context_window", False)
+        x_data, y_data = build_pos_samples(sentences, embedding_dim, label_to_idx, window_size=window_size, shuffle_window=shuffle_window)
+
     loss_fn = nn.CrossEntropyLoss()
+
+    # Optional diagnostics: plot spike rasters and output-layer membrane for first sample
+    if getattr(args, "diagnose", False):
+        first_x = x_data[:1]
+        spike_seq = spike_encode(first_x, sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
+        diagnostics = collect_forward_diagnostics(model, spike_seq)
+        spike_fig, _ = plot_layer_spike_trains(diagnostics, sample_index=0, input_spikes=spike_seq)
+        output_layer_name = list(diagnostics.keys())[-1]
+        mem_fig, _ = plot_layer_membrane_traces(diagnostics, layer_name=output_layer_name, sample_index=0)
+        plt.show()
+        return
 
     eval_start = time.perf_counter()
     test_loss, test_acc, test_avg_ac_ops, test_avg_energy_pj = evaluate_batches(
-        model,
-        x_data,
-        y_data,
-        batch_size,
-        device,
-        sim_steps,
-        input_mode,
-        encoding_method,
-        loss_fn,
+        model=model,
+        features=x_data,
+        labels=y_data,
+        batch_size=batch_size,
+        device=device,
+        n_steps=sim_steps,
+        input_mode=input_mode,
+        encoding_method=encoding_method,
+        loss_fn=loss_fn,
         estimate_energy=estimate_energy,
         eac_pj=eac_pj,
     )
@@ -257,4 +330,47 @@ def evaluate_model(args: Namespace) -> dict:
         print(f"Average AC operations per sample: {results['avg_ac_operations_per_sample']:.2f}")
         print(f"Average energy per sample: {results['avg_energy_pj_per_sample']:.2f} pJ")
 
+    if getattr(args, "output_json", False):
+        output_json = Path(args.output_json)
+        output_json.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_json, "w", encoding="utf-8") as handle:
+            json.dump(results, handle, indent=2)
+        print(f"Saved evaluation results to {output_json}")
+
     return results
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Evaluate a saved SNN POS model checkpoint")
+    parser.add_argument("--model_path", type=str, required=True, help="Path to a saved .pt checkpoint")
+    parser.add_argument("--input_file_prefix", type=str, default="pos_d100", help="Prefix for cast POS input files")
+    parser.add_argument("--split", type=str, default="test", choices=["train", "test"], help="Dataset split to evaluate")
+    parser.add_argument("--limit", type=int, default=None, help="Optional sample limit for quick evaluations")
+    parser.add_argument("--batch_size", type=int, default=None, help="Batch size override (defaults to checkpoint cli arg)")
+    parser.add_argument("--sim_steps", type=int, default=None, help="Simulation steps override (defaults to checkpoint model config)")
+    parser.add_argument("--input_mode", type=str, default="spatial", choices=["spatial", "temporal"], help="Input mode override")
+    parser.add_argument("--encoding_method", type=str, default="latency", choices=["poisson", "latency"], help="Encoding method override")
+    parser.add_argument("--estimate_energy", action="store_true", help="Estimate average AC operations and energy per tested sample")
+    parser.add_argument("--energy_ac_cost_pj", type=float, default=25.63, help="Energy cost of one AC operation in pJ (hardware-dependent)")
+    parser.add_argument("--diagnose", action="store_true", help="Show spike trains and output-layer membrane trace for first sample")
+    parser.add_argument("--output_json", type=str, default=None, help="Optional path to save evaluation results as JSON")
+    parser.add_argument("--window_size", type=int, default=5, help="Context window size for POS samples (odd integer)")
+    parser.add_argument("--shuffle_context_window", action="store_true", help="Special test condition: shuffle the context window word order after constructing it")
+
+    args = parser.parse_args()
+
+    # load model from checkpoint
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model, checkpoint = load_model_from_checkpoint(args.model_path, device)
+
+    # If not provided, place it next to the model checkpoint with a related name.
+    if not args.output_json:
+        args.output_json = Path(args.model_path).parent / f"eval_{Path(args.model_path).stem}.json"
+
+    # provide model to evaluate_model; other data will be loaded inside evaluate_model
+    args.model = model
+    evaluate_model(args)
+
+
+if __name__ == "__main__":
+    main()

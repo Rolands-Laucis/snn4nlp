@@ -12,7 +12,9 @@
 # python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10 --embeddings_path "input_data\word_embeddings\glove\glove_25d_sigmoid.pkl"
 # python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
 
-# python experiments/cast_pos_input.py --min_sentence_length 5 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
+# python experiments/cast_pos_input.py --limit 5000 --min_sentence_length 5 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
+# the limit is applied to sentence count to reduce computation and file sizes, because later the experiment only constructs random 20k samples of these.
+
 # python experiments/cast_ner_input.py
 
 
@@ -99,15 +101,21 @@ $epochs = 50
 
 # ---PHASE 3 - NLP tasks---
 # hyper params
-foreach ($sim_steps in @(15, 20, 25, 30, 40)) {
-    foreach ($beta in @(0.5, 0.75, 0.9, 0.95, 0.99)) {
-        $alpha = [math]::Round($beta/1.1, 2)
-        Write-Host "Running phase-0-A with sim_steps=$sim_steps beta=$beta alpha=$alpha"
+# foreach ($sim_steps in @(15, 20, 25, 30, 40)) {
+#     foreach ($beta in @(0.5, 0.75, 0.9, 0.95, 0.99)) {
+#         $alpha = [math]::Round($beta/1.1, 2)
+#         Write-Host "Running phase-0-A with sim_steps=$sim_steps beta=$beta alpha=$alpha"
 
-        python experiments/E_pos.py --input_mode "spatial" --encoding_method "latency" --output_file_prefix "upos_hypr-1" --epochs 5 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64 --threshold_layer_scalars "[1,1,1]"
-    }
-}
+#         python experiments/E_pos.py --input_mode "spatial" --encoding_method "latency" --output_file_prefix "upos_hypr-1" --epochs 5 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64 --threshold_layer_scalars "[1,1,1]"
+#     }
+# }
+$sim_steps = 20
+$beta = 0.95
+$alpha = 0.94 # best performance was with both equal, but that kinda reduces it to a lif, so add a bit of difference to keep it a second order neuron.
 
-# python experiments/E_pos.py --diagnose --input_mode "spatial" --encoding_method "latency" --output_file_prefix "diag" --epochs 5 --beta $beta --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64 # --threshold_layer_scalars $threshold_layer_scalars
+# python experiments/E_pos.py --diagnose --input_mode "spatial" --encoding_method "latency" --output_file_prefix "diag" --epochs 1 --beta $beta --sim_steps $sim_steps --limit 20000 --learning_rate $lr --batch_size 64 # --threshold_layer_scalars $threshold_layer_scalars
 # python experiments/E_pos.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "upos" --epochs $epochs --beta $beta --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --threshold_layer_scalars $threshold_layer_scalars
+
 # for POS also test spatial vs temporal input with shuffled token order in eval on trained models to see if either degrades and by how much, which would indicate whether temporal actually inputs token order implicitly
+# python experiments/E_pos_eval.py --shuffle_context_window --input_mode "spatial" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-02_17-32-33_e-50_s-20_spatial.pt"
+# python experiments/E_pos_eval.py --shuffle_context_window --input_mode "temporal" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-02_18-17-51_e-35_s-20_temporal.pt"
