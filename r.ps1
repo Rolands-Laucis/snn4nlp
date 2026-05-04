@@ -99,7 +99,9 @@ $epochs = 50
 # qlif is slightly worse than lif
 # python experiments/E_sent.py --input_file_prefix "sent_d100" --neuron_model "synaptic" --learn_alpha True --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --output_file_prefix "lat_sc_100_synaptic_learn" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval
 
-# ---PHASE 3 - NLP tasks---
+# ---PHASE 3 - UPOS task---
+$threshold_layer_scalars = "[1, 1, 1]"
+
 # hyper params
 # foreach ($sim_steps in @(15, 20, 25, 30, 40)) {
 #     foreach ($beta in @(0.5, 0.75, 0.9, 0.95, 0.99)) {
@@ -113,9 +115,16 @@ $sim_steps = 20
 $beta = 0.95
 $alpha = 0.94 # best performance was with both equal, but that kinda reduces it to a lif, so add a bit of difference to keep it a second order neuron.
 
-# python experiments/E_pos.py --diagnose --input_mode "spatial" --encoding_method "latency" --output_file_prefix "diag" --epochs 1 --beta $beta --sim_steps $sim_steps --limit 20000 --learning_rate $lr --batch_size 64 # --threshold_layer_scalars $threshold_layer_scalars
-# python experiments/E_pos.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "upos" --epochs $epochs --beta $beta --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --threshold_layer_scalars $threshold_layer_scalars
+# MODELS
+# python experiments/E_pos.py --diagnose --input_mode "spatial" --encoding_method "latency" --output_file_prefix "diag" --epochs 1 --beta $beta --sim_steps $sim_steps --limit 20000 --learning_rate $lr --batch_size 64
+# python experiments/E_pos.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "upos" --epochs $epochs --beta $beta --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
+# python experiments/E_pos.py --save --eval --input_mode "temporal" --encoding_method "latency" --output_file_prefix "upos" --epochs $epochs --beta $beta --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
 
 # for POS also test spatial vs temporal input with shuffled token order in eval on trained models to see if either degrades and by how much, which would indicate whether temporal actually inputs token order implicitly
 # python experiments/E_pos_eval.py --shuffle_context_window --input_mode "spatial" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-02_17-32-33_e-50_s-20_spatial.pt"
-# python experiments/E_pos_eval.py --shuffle_context_window --input_mode "temporal" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-02_18-17-51_e-35_s-20_temporal.pt"
+# python experiments/E_pos_eval.py --input_mode "temporal" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-03_07-46-23_e-50_s-20_temporal.pt"
+# python experiments/E_pos_eval.py --shuffle_context_window --input_mode "temporal" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-03_07-46-23_e-50_s-20_temporal.pt"
+
+# UPOS seq2seq mode
+python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq_tmp" --epochs 1 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64
+# python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq" --epochs $epochs --beta $beta --alpha $alpha --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
