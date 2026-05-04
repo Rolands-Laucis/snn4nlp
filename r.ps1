@@ -14,6 +14,7 @@
 
 # python experiments/cast_pos_input.py --limit 5000 --min_sentence_length 5 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
 # the limit is applied to sentence count to reduce computation and file sizes, because later the experiment only constructs random 20k samples of these.
+# and seq2seq up to 20 token sentences gets almost 4k samples also.
 
 # python experiments/cast_ner_input.py
 
@@ -36,7 +37,7 @@ $lr = 1e-4 #SNNLP paper used 1e-5, which is modest imo. Seems like learning is q
 #         python experiments/E_sent.py --input_mode "spatial" --encoding_method "poisson" --decoding_method "spike_count" --epochs 10 --beta $beta --sim_steps $sim_steps --threshold 1 --threshold_layer_scalars "[1, 0.8, 0.7]" --limit 1000 --learning_rate $lr --batch_size 64 --output_file_prefix "hypr-1"
 #     }
 # }
-# best for sentiment with spatial input found to be sim_steps=40 (will use 25) and beta=0.95
+# best for sentiment with spatial input found to be sim_steps=40 and beta=0.95
 $sim_steps = 30 #a bit less to save on compute for temporal input
 $beta = 0.95
 
@@ -74,12 +75,6 @@ $epochs = 50
 # the best accuracy is with sim_steps=20 and 30, but not 25, and learning beta at 0.95, which means it probably tries to keep all past context right to the end.
 # for the sake of computational cost, will use spatial input for the rest of the experiments, as it trains much faster, and has higher train accuracy
 
-# ---PHASE 1 - ANN equivalent---
-# python experiments/E_sent_ann.py --input_file_prefix "sent_d50" --output_file_prefix "ann_50d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
-# python experiments/E_sent_ann.py --input_file_prefix "sent_d25" --output_file_prefix "ann_25d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
-# python experiments/E_sent_ann.py --input_file_prefix "sent_d100" --output_file_prefix "ann_100d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
-
-
 # ---PHASE 1 - ENCODING AND DECODING---
 # spatial wins; vary encoding and decoding method
 # python experiments/E_sent.py --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "lat_sc"
@@ -92,12 +87,19 @@ $epochs = 50
 # python experiments/E_sent.py --input_file_prefix "sent_d25" --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "lat_sc_25"
 # python experiments/E_sent.py --input_file_prefix "sent_d100" --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "lat_sc_100"
 
+# ANN equivalent for dimension comparison.
+# python experiments/E_sent_ann.py --input_file_prefix "sent_d50" --output_file_prefix "ann_50d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+# python experiments/E_sent_ann.py --input_file_prefix "sent_d25" --output_file_prefix "ann_25d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+# python experiments/E_sent_ann.py --input_file_prefix "sent_d100" --output_file_prefix "ann_100d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+
+# neuron model
 # python experiments/E_sent.py --diagnose --input_file_prefix "sent_d25" --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --neuron_model "synaptic" --output_file_prefix "lat_sc_100_synaptic" --per_neuron_params True --learn_alpha True --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64
 # python experiments/E_sent.py --input_file_prefix "sent_d100" --neuron_model "qlif" --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --output_file_prefix "lat_sc_100_qlif" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval
 # python experiments/E_sent.py --input_file_prefix "sent_d100" --neuron_model "synaptic" --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --output_file_prefix "lat_sc_100_synaptic" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval
 # synaptic does really well and achieves 99% train acc in the first 20 epochs with learn alpha false
 # qlif is slightly worse than lif
 # python experiments/E_sent.py --input_file_prefix "sent_d100" --neuron_model "synaptic" --learn_alpha True --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --output_file_prefix "lat_sc_100_synaptic_learn" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval
+
 
 # ---PHASE 3 - UPOS task---
 $threshold_layer_scalars = "[1, 1, 1]"
