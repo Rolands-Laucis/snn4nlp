@@ -14,10 +14,10 @@
 
 # python experiments/cast_pos_input.py --limit 5000 --min_sentence_length 5 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
 # the limit is applied to sentence count to reduce computation and file sizes, because later the experiment only constructs random 20k samples of these.
+# python experiments/cast_pos_input.py --limit 20000 --min_sentence_length 5 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
 # and seq2seq up to 20 token sentences gets almost 4k samples also.
 
 # python experiments/cast_ner_input.py
-
 
 # tests
 # python experiments/readers.py
@@ -29,7 +29,7 @@
 
 $lr = 1e-4 #SNNLP paper used 1e-5, which is modest imo. Seems like learning is quite stable, and can handle higher learning rates, so will use 1e-4 to speed up training.
 
-# phase 0 - hyper parameter tuning for sentiment
+# hype-1 parameter tuning for sentiment
 # foreach ($sim_steps in @(15, 20, 25, 30, 40)) {
 #     foreach ($beta in @(0.5, 0.75, 0.9, 0.95, 0.99)) {
 #         Write-Host "Running phase-0-A with sim_steps=$sim_steps beta=$beta"
@@ -41,6 +41,7 @@ $lr = 1e-4 #SNNLP paper used 1e-5, which is modest imo. Seems like learning is q
 $sim_steps = 30 #a bit less to save on compute for temporal input
 $beta = 0.95
 
+# hyper-2
 # foreach ($l1 in @(0.6, 0.7, 0.8, 0.9)) {
 #     foreach ($l2 in @(1, 1.1, 1.2, 1.5, 2)) { #$l2 /= $l1
 #         $l2 = [math]::Round($l1/$l2, 2) # round to 2 decimal places
@@ -53,7 +54,7 @@ $beta = 0.95
 $threshold_layer_scalars = "[1, 0.7, 0.7]"
 
 # consistent settings for all runs
-$limit = 20000
+$limit = 20000 #for sent this is higher than the number of samples in the dataset, but for POS it is lower.
 $batch_size = 32
 $epochs = 50
 
@@ -67,6 +68,7 @@ $epochs = 50
 # temporal mode is quite less accurate in train, but the test score is very close to train for both tanh and sigmoid, meaning it prob generalizes better than spatial mode.
 # need to test, if other hyper params would improve it:
 
+# hyper-3 for temporal mode
 # foreach ($sim_steps in @(15, 20, 25, 30, 40)) {
 #     Write-Host "Running phase-1-B with sim_steps=$sim_steps beta=$beta"
 
@@ -128,5 +130,5 @@ $alpha = 0.94 # best performance was with both equal, but that kinda reduces it 
 # python experiments/E_pos_eval.py --shuffle_context_window --input_mode "temporal" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-03_07-46-23_e-50_s-20_temporal.pt"
 
 # UPOS seq2seq mode
-python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq_tmp" --epochs 1 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64
+# python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq_tmp" --epochs 1 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64
 # python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq" --epochs $epochs --beta $beta --alpha $alpha --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
