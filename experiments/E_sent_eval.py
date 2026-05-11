@@ -363,10 +363,21 @@ def evaluate_model(args:Namespace) -> dict:
 		spike_seq = spike_encode(first_x, sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
 		diagnostics = collect_forward_diagnostics(model, spike_seq)
 		# spike raster
-		spike_fig, _ = plot_layer_spike_trains(diagnostics, sample_index=0, input_spikes=spike_seq)
+		spike_fig, _ = plot_layer_spike_trains(diagnostics, sample_index=0, input_spikes=spike_seq, model_name=getattr(args, "diagnose_title", ""))
 		# output layer membrane traces
 		output_layer_name = list(diagnostics.keys())[-1]
 		mem_fig, _ = plot_layer_membrane_traces(diagnostics, layer_name=output_layer_name, sample_index=0)
+		# apply optional title
+		# diagnose_title = getattr(args, "diagnose_title", None)
+		# if diagnose_title:
+		# 	try:
+		# 		spike_fig.suptitle(diagnose_title)
+		# 	except Exception:
+		# 		pass
+		# 	try:
+		# 		mem_fig.suptitle(diagnose_title)
+		# 	except Exception:
+		# 		pass
 		plt.show()
 		return
 
@@ -460,6 +471,7 @@ def main():
 	parser.add_argument("--ttfs_temporal_loss", type=str, default="ce_temporal_loss", choices=["ce_temporal_loss", "mse_temporal_loss"], help="TTFS temporal loss override")
 	parser.add_argument("--estimate_energy", action="store_true", help="Estimate average AC operations and energy per tested sample")
 	parser.add_argument("--energy_ac_cost_pj", type=float, default=25.63, help="Energy cost of one AC operation in pJ (hardware-dependent)")
+	parser.add_argument("--diagnose_title", type=str, default=None, help="Optional title for diagnostic plots")
 	parser.add_argument("--diagnose", action="store_true", help="Show spike trains and output-layer membrane trace for first sample")
 	parser.add_argument("--output_json", type=str, default=None, help="Optional path to save evaluation results as JSON")
 	args = parser.parse_args()
