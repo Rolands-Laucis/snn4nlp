@@ -38,9 +38,32 @@ train = ReadParquetFile(INPUT_DATA_DIR / 'sst-2' / 'train-00000-of-00001.parquet
 test = ReadParquetFile(INPUT_DATA_DIR / 'sst-2' / 'validation-00000-of-00001.parquet')
 print('Original dataset sizes:')
 print(len(train), len(test))
-combined = pd.concat([train, test], ignore_index=True)
 # exit(0)
 
+# Plot histogram with mean line
+if False:
+    # Combine datasets temporarily for visualization
+    combined_sentences = list(train['sentence']) + list(test['sentence'])
+    sentence_lengths = [len(sentence.split()) if isinstance(sentence, str) else len(sentence) for sentence in combined_sentences]
+    plt.figure(figsize=(10, 6))
+    plt.hist(sentence_lengths, bins=50, edgecolor='black', alpha=0.7)
+    
+    mean_length = np.mean(sentence_lengths)
+    min = np.min(sentence_lengths)
+    max = np.max(sentence_lengths)
+    print(f"Sentence length stats - Mean: {mean_length:.2f}, Min: {min}, Max: {max}")
+
+    plt.axvline(mean_length, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_length:.2f}')
+    plt.xlabel('Sentence Length (words)')
+    plt.ylabel('Frequency')
+    plt.title('Distribution of Sentence Lengths (Train + Dev + Test)')
+    plt.legend()
+    plt.grid(axis='y', alpha=0.3)
+    plt.show()
+    exit(0)
+
+
+combined = pd.concat([train, test], ignore_index=True)
 #filter sentences by length
 if args.min_sentence_length or args.max_sentence_length:
     def filter_by_length(df, min_len, max_len):
@@ -75,23 +98,7 @@ print(len(train), len(test))
 # print label count
 print('Train label distribution:')
 print(train['label'].value_counts())
-# exit(0)
-
-# Plot histogram with mean line
-if False:
-    # Combine datasets temporarily for visualization
-    combined_sentences = list(train['sentence']) + list(test['sentence'])
-    sentence_lengths = [len(sentence.split()) if isinstance(sentence, str) else len(sentence) for sentence in combined_sentences]
-    plt.figure(figsize=(10, 6))
-    plt.hist(sentence_lengths, bins=50, edgecolor='black', alpha=0.7)
-    mean_length = np.mean(sentence_lengths)
-    plt.axvline(mean_length, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_length:.2f}')
-    plt.xlabel('Sentence Length (words)')
-    plt.ylabel('Frequency')
-    plt.title('Distribution of Sentence Lengths (Train + Dev + Test)')
-    plt.legend()
-    plt.grid(axis='y', alpha=0.3)
-    plt.show()
+exit(0)
 
 
 #load word embeddings
