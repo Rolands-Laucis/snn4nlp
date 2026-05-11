@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from colors import colors
+from viz_util import colors
 
 import matplotlib.pyplot as plt
 import torch
@@ -173,10 +173,11 @@ def collect_forward_diagnostics(
 def plot_layer_spike_trains(
     diagnostics: dict[str, LayerDiagnostics],
     sample_index: int = 0,
-    point_size: float = 8.0,
+    point_size: float = 20.0,
     figsize_per_layer: tuple[float, float] = (10.0, 2.8),
     input_spikes: torch.Tensor | None = None,
     input_layer_name: str = "input",
+    model_name: str = "",
 ) -> tuple[plt.Figure, list[plt.Axes]]:
     """
     Plot spike rasters for each layer using one sample from the batch.
@@ -222,9 +223,17 @@ def plot_layer_spike_trains(
             neuron_idx = spike_points[:, 1].numpy()
             ax.scatter(time_idx, neuron_idx, s=point_size, marker=".", alpha=1, linewidths=0, color=colors.spike_dot)
 
-        ax.set_title(f"{layer_name}: spike train raster (sample={sample_index})")
-        ax.set_xlabel("time step")
-        ax.set_ylabel("neuron id")
+        cast_layer_name = layer_name
+        if cast_layer_name == "lif1":
+            cast_layer_name = "Layer 1"
+        elif cast_layer_name == "lif2":
+            cast_layer_name = "Layer 2"
+        elif cast_layer_name == "lif3":
+            cast_layer_name = "output"
+        # cast_layer_name = cast_layer_name.capitalize()
+        ax.set_title(f"{model_name + ' ' if model_name else ''}{cast_layer_name} (sample {sample_index})")
+        ax.set_xlabel("Time step")
+        ax.set_ylabel("Neuron")
         ax.set_xlim(-0.5, spikes.shape[0] - 0.5)
         ax.set_ylim(-0.5, sample_spikes.shape[1] - 0.5)
         ax.grid(True, alpha=0.25)
@@ -274,10 +283,10 @@ def plot_neuron_membrane_trace(
             ax.scatter(spike_times, spike_values, s=24, c=colors.spike, label="spike")
 
     ax.set_title(
-        f"{layer_name} neuron {neuron_index}: membrane vs threshold (sample={sample_index})"
+        f"Output neuron {neuron_index} membrane potential (sample={sample_index})"
     )
-    ax.set_xlabel("time step")
-    ax.set_ylabel("membrane potential")
+    ax.set_xlabel("Time step")
+    ax.set_ylabel("Potential")
     ax.set_xlim(-0.5, mem.shape[0] - 0.5)
     ax.grid(True, alpha=0.25)
     if show_legend:
