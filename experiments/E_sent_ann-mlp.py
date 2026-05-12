@@ -57,9 +57,9 @@ class SentimentMLP(nn.Module):
         super().__init__()
         self.input_dim = input_dim
         self.fc1 = nn.Linear(input_dim, 256)
-        self.act1 = nn.Tanh()
+        self.act1 = nn.ReLU()
         self.fc2 = nn.Linear(256, 128)
-        self.act2 = nn.Tanh()
+        self.act2 = nn.ReLU()
         self.fc_out = nn.Linear(128, output_size)
 
     def forward(self, x):
