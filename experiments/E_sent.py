@@ -3,6 +3,7 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
+from pprint import pprint
 
 import matplotlib.pyplot as plt
 import snntorch as snn
@@ -210,31 +211,15 @@ if args.diagnose:
     print(f"Diagnostics enabled. Export directory: {diagnose_dir}")
 
 print("\nTraining config:")
-print(f"  Device: {device}")
-print(f"  Input mode: {input_mode}")
-print(f"  Encoding method: {encoding_method}")
-print(f"  Decoding method: {decoding_method}")
-print(f"  Loss: {ttfs_loss_fn.__class__.__name__ if decoding_method == 'ttfs' else loss_fn.__class__.__name__}")
-print(f"  Neuron model: {neuron_model}")
-print(f"  Beta: {args.beta}")
-print(f"  Threshold: {args.threshold}")
-print(f"  Threshold layer scalars: {args.threshold_layer_scalars}")
-print(f"  Learn Beta: {args.learn_beta}")
-print(f"  Learn Threshold: {args.learn_threshold}")
-print(f"  Alpha: {alpha}")
-print(f"  Sequence length: {sequence_length}")
-print(f"  Embedding dim: {embedding_dim}")
-print(f"  Input size: {input_size}")
-print(f"  Hidden size 1: {args.num_hidden_1}")
-print(f"  Hidden size 2: {args.num_hidden_2}")
-print(f"  Output classes: {num_labels}")
-print(f"  Num steps: {args.sim_steps}")
-print(f"  Batch size: {args.batch_size}")
-print(f"  Epochs: {args.epochs}")
-print(f"  Learning rate: {args.learning_rate}")
-print(f"  Total learnable parameters: {total_params}")
-print(f"  Save: {args.save}")
-print(f"  Eval: {args.eval}")
+pprint(args.__dict__ | {
+    "alpha": alpha, 
+    "Loss_fn": {ttfs_loss_fn.__class__.__name__ if decoding_method == 'ttfs' else loss_fn.__class__.__name__},
+    "sequence_length": sequence_length,
+    "embedding_dim": embedding_dim,
+    "input_size": input_size,
+    "total_params": total_params,
+    "output_classes": num_labels,
+    })
 
 # Train (samples are shuffled by DataLoader each epoch)
 epoch_losses = []
