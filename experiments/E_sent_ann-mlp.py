@@ -52,34 +52,20 @@ def build_sentiment_samples(samples, embedding_dim):
     return X, y
 
 
-class SequenceSentimentLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_size, fc_hidden, output_size, num_layers=1, bidirectional=False, dropout=0.0):
+class SentimentMLP(nn.Module):
+    def __init__(self, input_dim, output_size):
         super().__init__()
         self.input_dim = input_dim
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.bidirectional = bidirectional
-
-        self.lstm = nn.LSTM(
-            input_size=input_dim,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            batch_first=True,
-            bidirectional=bidirectional,
-            dropout=dropout if num_layers > 1 else 0.0,
-        )
-
-        lstm_out_dim = hidden_size * (2 if bidirectional else 1)
-        self.fc1 = nn.Linear(lstm_out_dim, fc_hidden)
-        self.act = nn.ReLU()
-        self.fc_out = nn.Linear(fc_hidden, output_size)
+        self.fc1 = nn.Linear(input_dim, 256)
+        self.act1 = nn.Tanh()
+        self.fc2 = nn.Linear(256, 128)
+        self.act2 = nn.Tanh()
+        self.fc_out = nn.Linear(128, output_size)
 
     def forward(self, x):
-        # x: [B, T, input_dim]
-        outputs, (h_n, c_n) = self.lstm(x)
-        # use the final timestep output
-        last_out = outputs[:, -1, :]
-        h = self.act(self.fc1(last_out))
+        h = x.view(x.size(0), -1)
+        h = self.act1(self.fc1(h))
+        h = self.act2(self.fc2(h))
         logits = self.fc_out(h)
         return logits
 
@@ -115,14 +101,10 @@ def evaluate_batches(model, features, labels, batch_size, device, loss_fn):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train an LSTM sentiment classifier (non-spiking)")
+    parser = argparse.ArgumentParser(description="Train an MLP sentiment classifier (non-spiking)")
     parser.add_argument("--input_file_prefix", type=str, default="sent_d50", help="Prefix for input files")
     parser.add_argument("--limit", type=int, default=None, help="Limit sample count after dataset preparation (applied separately to train and test)")
-    parser.add_argument("--num_hidden_1", type=int, default=256, help="LSTM hidden size")
-    parser.add_argument("--num_hidden_2", type=int, default=128, help="FC hidden size")
-    parser.add_argument("--num_layers", type=int, default=1, help="Number of LSTM layers")
-    parser.add_argument("--bidirectional", action="store_true", help="Use bidirectional LSTM")
-    parser.add_argument("--input_mode", type=str, default="spatial", choices=["spatial"], help="Input mode: only 'spatial' is supported for this ANN")
+    parser.add_argument("--input_mode", type=str, default="spatial", choices=["spatial"], help="Input mode: the full embedding sequence is flattened for the MLP")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
     parser.add_argument("--epochs", type=int, default=3, help="Number of training epochs")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
@@ -132,7 +114,7 @@ def main():
     parser.add_argument("--output_file_prefix", type=str, default="", help="Prefix for output files")
     args = parser.parse_args()
 
-    # This ANN expects spatial inputs: the full sequence of embeddings is passed directly to the LSTM.
+    # This ANN expects spatial inputs: the full sequence of embeddings is flattened into one vector per sample.
     if args.input_mode.lower() != "spatial":
         raise ValueError("Only --input_mode spatial is supported for the ANN implementation")
 
@@ -155,17 +137,16 @@ def main():
         y_test = y_test[:test_limit]
 
     sequence_length = X_train.shape[1]
+    flattened_input_dim = int(sequence_length * embedding_dim)
+    X_train = X_train.reshape(X_train.shape[0], -1)
+    X_test = X_test.reshape(X_test.shape[0], -1)
     num_labels = 2
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = SequenceSentimentLSTM(
-        input_dim=embedding_dim,
-        hidden_size=args.num_hidden_1,
-        fc_hidden=args.num_hidden_2,
+    model = SentimentMLP(
+        input_dim=flattened_input_dim,
         output_size=num_labels,
-        num_layers=args.num_layers,
-        bidirectional=args.bidirectional,
     )
     model = model.to(device)
 
@@ -187,11 +168,12 @@ def main():
             "training_start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "training_end_date": None,
             "training_duration_s": None,
-            "task": "sequence_binary_sentiment_lstm",
+            "task": "sequence_binary_sentiment_mlp",
             "embedding_dim": int(embedding_dim),
             "embedding_normalization_mode": emb_normalization_mode,
             "sequence_length": int(sequence_length),
-            "input_dim": int(embedding_dim),
+            "input_dim": int(flattened_input_dim),
+            "layer_sizes": [int(flattened_input_dim), 256, 128, 2],
             "num_labels": num_labels,
             "num_training_samples": int(X_train.shape[0]),
             "num_test_samples": int(X_test.shape[0]),
@@ -213,7 +195,7 @@ def main():
     # Training loop
     epoch_losses = []
     epoch_accuracies = []
-    training_start_time = time.perf_counter()
+    training_start_perf = time.perf_counter()
     model.train()
     for epoch in range(args.epochs):
         running_loss = 0.0
@@ -247,7 +229,7 @@ def main():
         save_training_metadata(metadata_file, training_metadata)
 
         epoch_time = time.perf_counter() - epoch_start
-        elapsed = time.perf_counter() - training_start_time
+        elapsed = time.perf_counter() - training_start_perf
         avg_epoch = elapsed / float(epoch + 1)
         remaining = max(0, args.epochs - (epoch + 1))
         eta_min = (avg_epoch * remaining) / 60.0
@@ -255,21 +237,18 @@ def main():
 
     training_end_time = datetime.now()
     training_metadata["training_config"]["training_end_date"] = training_end_time.strftime("%Y-%m-%d %H:%M:%S")
-    training_metadata["training_config"]["training_duration_s"] = (training_end_time - datetime.fromtimestamp(training_start_time)).total_seconds() if isinstance(training_start_time, float) else None
+    training_metadata["training_config"]["training_duration_s"] = time.perf_counter() - training_start_perf
 
     checkpoint = None
     if args.save:
         model_output_path = output_dir / f"{run_filename_base}.pt"
         checkpoint = {
             "model_state_dict": model.state_dict(),
-            "model_class": "SequenceSentimentLSTM",
+            "model_class": "SentimentMLP",
             "model_config": {
-                "input_dim": embedding_dim,
-                "hidden_size": args.num_hidden_1,
-                "fc_hidden": args.num_hidden_2,
+                "input_dim": flattened_input_dim,
                 "output_size": num_labels,
-                "num_layers": args.num_layers,
-                "bidirectional": bool(args.bidirectional),
+                "layer_sizes": [int(flattened_input_dim), 256, 128, 2],
             },
             "label_maps": {"label_to_idx": {"negative": 0, "positive": 1}, "idx_to_label": {0: "negative", 1: "positive"}},
             "metrics": {"epoch_train_loss": epoch_losses, "epoch_train_accuracy": epoch_accuracies},
