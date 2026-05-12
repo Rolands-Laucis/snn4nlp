@@ -90,9 +90,16 @@ $epochs = 50
 # python experiments/E_sent.py --input_file_prefix "sent_d100" --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval --output_file_prefix "lat_sc_100"
 
 # ANN equivalent for dimension comparison.
-# python experiments/E_sent_ann.py --input_file_prefix "sent_d50" --output_file_prefix "ann_50d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
-# python experiments/E_sent_ann.py --input_file_prefix "sent_d25" --output_file_prefix "ann_25d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
-# python experiments/E_sent_ann.py --input_file_prefix "sent_d100" --output_file_prefix "ann_100d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+# python experiments/E_sent_ann-mlp.py --input_file_prefix "sent_d50" --output_file_prefix "ann_mlp_50d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+# python experiments/E_sent_ann-mlp.py --input_file_prefix "sent_d50" --output_file_prefix "ann_mlp_50d" --limit 1000 --learning_rate $lr --batch_size $batch_size --epochs 1 --save --eval
+# python experiments/E_sent_ann-mlp.py --input_file_prefix "sent_d25" --output_file_prefix "ann_mlp_25d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+# python experiments/E_sent_ann-mlp.py --input_file_prefix "sent_d100" --output_file_prefix "ann_mlp_100d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+
+python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d25" --output_file_prefix "ann_lstm_25" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d50" --output_file_prefix "ann_lstm_50" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d100" --output_file_prefix "ann_lstm_100" --lstm_bidirectional False --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d100" --output_file_prefix "ann_bilstm_100" --lstm_bidirectional True --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+
 
 # neuron model
 # python experiments/E_sent.py --diagnose --input_file_prefix "sent_d25" --input_mode "temporal" --encoding_method "poisson" --decoding_method "spike_count" --neuron_model "synaptic" --output_file_prefix "lat_sc_100_synaptic" --per_neuron_params True --learn_alpha True --epochs 1 --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64
