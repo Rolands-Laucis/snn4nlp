@@ -103,6 +103,12 @@ $epochs = 50
 # python experiments/E_sent.py --input_file_prefix "sent_d100" --neuron_model "synaptic" --learn_alpha True --input_mode "spatial" --encoding_method "latency" --decoding_method "spike_count" --output_file_prefix "lat_sc_100_synaptic_learn" --epochs $epochs --beta $beta --threshold 1 --threshold_layer_scalars $threshold_layer_scalars --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size --save --eval
 
 
+# python experiments/E_sent_eval.py --input_file_prefix "sent_d100" --model_path "output_results\E_sent\main-2\lat_sc_100_2026-04-30_11-03-04_e-50_s-30_spatial.pt" --encoding_method "latency" --decoding_method "spike_count" --sim_steps $sim_steps --batch_size $batch_size --output_json "./100d_eval.json"
+# python experiments/E_sent_eval.py --input_file_prefix "sent_d100" --model_path "output_results\E_sent\neuron_model\lat_sc_100_lif_2026-05-12_07-55-49_e-50_s-30_spatial.pt" --encoding_method "latency" --decoding_method "spike_count" --sim_steps $sim_steps --batch_size $batch_size --output_json "./100d_eval.json"
+# python experiments/E_sent_eval.py --input_file_prefix "sent_d50" --model_path "output_results\E_sent\main\lat_sc_2026-04-30_08-23-34_e-50_s-30_spatial.json" --encoding_method "latency" --decoding_method "spike_count" --sim_steps $sim_steps --batch_size $batch_size --output_json "./50d_eval.json"
+# python experiments/E_sent_eval.py --input_file_prefix "sent_d25" --model_path "output_results\E_sent\main-2\lat_sc_25_2026-05-01_07-39-56_e-50_s-30_spatial.pt" --encoding_method "latency" --decoding_method "spike_count" --sim_steps $sim_steps --batch_size $batch_size --output_json "./25d_eval.json"
+
+
 # ---PHASE 3 - UPOS task---
 $threshold_layer_scalars = "[1, 1, 1]"
 

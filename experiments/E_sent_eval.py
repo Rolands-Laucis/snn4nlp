@@ -172,7 +172,7 @@ def estimate_batch_energy(model, spike_seq, eac_pj):
 
 
 def load_model_from_checkpoint(model_path, device):
-	checkpoint = torch.load(model_path, map_location=device)
+	checkpoint = torch.load(model_path, map_location=device) #, weights_only=False
 	if "model_state_dict" not in checkpoint or "model_config" not in checkpoint:
 		raise ValueError("Checkpoint is missing required keys: model_state_dict/model_config")
 
