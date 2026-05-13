@@ -119,19 +119,22 @@ $threshold_layer_scalars = "[1, 1, 1]"
 
 # hyper params
 # foreach ($sim_steps in @(15, 20, 25, 30, 40)) {
-#     foreach ($beta in @(0.5, 0.75, 0.9, 0.95, 0.99)) {
-#         $alpha = [math]::Round($beta/1.1, 2)
-#         Write-Host "Running phase-0-A with sim_steps=$sim_steps beta=$beta alpha=$alpha"
-
-#         python experiments/E_pos.py --input_mode "spatial" --encoding_method "latency" --output_file_prefix "upos_hypr-1" --epochs 5 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64 --threshold_layer_scalars "[1,1,1]"
+#     foreach ($beta in @(0.8, 0.9, 0.95, 0.99)) {
+#         python experiments/E_pos.py --input_mode "spatial" --encoding_method "latency" --output_file_prefix "hypr-1/upos_hypr-1" --epochs 5 --beta $beta --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64 --threshold_layer_scalars $threshold_layer_scalars
 #     }
 # }
 $sim_steps = 20
-$beta = 0.95
-$alpha = 0.94 # best performance was with both equal, but that kinda reduces it to a lif, so add a bit of difference to keep it a second order neuron.
+$beta = 0.9
+
+# hypr-2 for alpha
+# foreach ($alpha in @(0.8, 0.9, 0.95, 0.99)) {
+#    python experiments/E_pos.py --input_mode "spatial" --encoding_method "latency" --output_file_prefix "hypr-2/upos_hypr-2" --epochs 5 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64 --threshold_layer_scalars $threshold_layer_scalars
+# }
+$alpha = 0.95
 
 # MODELS
 # python experiments/E_pos.py --diagnose --input_mode "spatial" --encoding_method "latency" --output_file_prefix "diag" --epochs 1 --beta $beta --sim_steps $sim_steps --limit 20000 --learning_rate $lr --batch_size 64
+# python experiments/E_pos.py --input_mode "spatial" --encoding_method "latency" --output_file_prefix "tmp" --epochs 1 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 32
 # python experiments/E_pos.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "upos-win-snn" --epochs $epochs --beta $beta --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
 # python experiments/E_pos.py --save --eval --input_mode "temporal" --encoding_method "latency" --output_file_prefix "upos-win-snn" --epochs $epochs --beta $beta --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
 
@@ -140,10 +143,11 @@ $alpha = 0.94 # best performance was with both equal, but that kinda reduces it 
 # python experiments/E_pos_eval.py --input_mode "temporal" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-03_07-46-23_e-50_s-20_temporal.pt"
 # python experiments/E_pos_eval.py --shuffle_context_window --input_mode "temporal" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-03_07-46-23_e-50_s-20_temporal.pt"
 
+
+# UPOS seq2seq mode
+python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq_tmp" --epochs 1 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64
+# python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq" --epochs $epochs --beta $beta --alpha $alpha --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
+
 # UPOS ANN MLP
 # python experiments/E_pos_ann-mlp.py --save --eval --limit 1000 --learning_rate $lr --batch_size $batch_size --epochs 1
 # python experiments/E_pos_seq_ann-mlp.py --save --eval --limit 1000 --learning_rate $lr --batch_size $batch_size --epochs 1
-
-# UPOS seq2seq mode
-# python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq_tmp" --epochs 1 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64
-# python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq" --epochs $epochs --beta $beta --alpha $alpha --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size

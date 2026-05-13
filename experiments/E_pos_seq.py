@@ -16,7 +16,6 @@ from torch.utils.data import DataLoader, TensorDataset
 from readers import ReadUPOSInputFile
 from snn_util import spike_encode, get_neuron_beta_values_by_layer, parse_threshold_layer_scalars
 from snn_diagnostics import collect_forward_diagnostics, plot_layer_spike_trains, plot_layer_membrane_traces
-from TorchCRF import CRF
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAST_INPUT_DIR = PROJECT_ROOT / "input_data" / "cast_pos"
@@ -130,22 +129,20 @@ def build_seq_samples(
     sentences: list[list[list[Any]]],
     embedding_dim: int,
     label_to_idx: dict[str, int],
-    max_len: int = 10,
+    seq_len: int,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Build sequence samples: keep only sentences with length <= max_len, pad shorter ones
+    Build sequence samples: keep all sentences and pad shorter ones
     with zero vectors. Returns (X, y, mask) where
-    - X: (samples, max_len, embedding_dim)
-    - y: (samples, max_len) long tensor with label indices (0 if padded)
-    - mask: (samples, max_len) bool tensor where True indicates real token
+    - X: (samples, seq_len, embedding_dim)
+    - y: (samples, seq_len) long tensor with label indices (0 if padded)
+    - mask: (samples, seq_len) bool tensor where True indicates real token
     """
     samples = []
     labels = []
     masks = []
 
     for sentence in sentences:
-        if len(sentence) > max_len:
-            continue
         seq = []
         lab = []
         m = []
@@ -155,7 +152,7 @@ def build_seq_samples(
             m.append(True)
 
         # pad
-        while len(seq) < max_len:
+        while len(seq) < seq_len:
             seq.append([0.0] * embedding_dim)
             lab.append(0)
             m.append(False)
@@ -177,10 +174,6 @@ def decode_predictions(spike_counts: torch.Tensor) -> tuple[torch.Tensor, int]:
 
 def compute_classification_loss(loss_fn, y_true: torch.Tensor, spike_counts: torch.Tensor) -> torch.Tensor:
     return loss_fn(spike_counts, y_true)
-
-def _model_has_seq_head(model) -> bool:
-    return hasattr(model, "seq_linear") and getattr(model, "seq_linear") is not None
-
 
 def estimate_batch_ac_operations(model, spike_seq):
     """
@@ -285,36 +278,31 @@ def evaluate_batches(
             yb = yb.to(device)
             mb = mb.to(device)
 
+            batch_size_eff, seq_len_eff, _ = xb.shape
+            xb_flat = xb.reshape(batch_size_eff, -1)
+            spike_seq = spike_encode(
+                xb_flat.unsqueeze(1),
+                n_steps,
+                input_mode=input_mode,
+                encoding_method=encoding_method,
+            ).to(device)
+
             if estimate_energy:
-                # estimate energy on entire sequence by summing token estimates
-                # spike_encode expects [B, seq_len, emb_dim]; select first token and keep seq_len dim
                 batch_ac_ops, batch_energy_pj = estimate_batch_energy(
                     model,
-                    spike_encode(xb[:, 0:1, :], n_steps, input_mode=input_mode, encoding_method=encoding_method).to(device),
+                    spike_seq,
                     eac_pj,
                 )
                 running_ac_ops += float(batch_ac_ops.sum().item())
                 running_energy_pj += float(batch_energy_pj.sum().item())
 
-            # Build emissions per token
-            emissions_steps = []
-            for t in range(xb.shape[1]):
-                token_emb = xb[:, t, :]
-                # token_emb is [B, emb_dim] — spike_encode expects [B, seq_len, emb_dim]
-                spike_seq_tok = spike_encode(token_emb.unsqueeze(1), n_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
-                per_step_spikes_tok = model(spike_seq_tok)
-                spike_sum_tok = per_step_spikes_tok.sum(dim=0)
-                if _model_has_seq_head(model):
-                    emissions_t = model.seq_linear(spike_sum_tok)
-                else:
-                    emissions_t = spike_sum_tok
-                emissions_steps.append(emissions_t)
+            per_step_spikes = model(spike_seq)
+            spike_sum = per_step_spikes.sum(dim=0)
+            emissions = spike_sum.view(batch_size_eff, seq_len_eff, -1)
 
-            emissions = torch.stack(emissions_steps, dim=1)
-
-            # CRF loss
-            log_likelihood = crf(emissions, yb, mask=mb)
-            loss = -log_likelihood.mean()
+            valid_emissions = emissions[mb]
+            valid_labels = yb[mb]
+            loss = loss_fn(valid_emissions, valid_labels)
 
             running_loss += loss.item() * int(mb.sum().item())
             preds = emissions.argmax(dim=-1)
@@ -347,7 +335,6 @@ def load_model_from_checkpoint(model_path, device):
         threshold=cli_args.get("threshold"),
         threshold_layer_scalars=threshold_layer_scalars,
     )
-    model.init_seq_classifier(hidden_size=int(model_config["output_size"]), num_tags=int(model_config["output_size"]))
     model.load_state_dict(checkpoint["model_state_dict"])
     model = model.to(device)
     model.eval()
@@ -382,45 +369,56 @@ def evaluate_model(args: Namespace) -> dict:
 
     print(f"Evaluating model", model_path, 'Limit:', limit)
 
-    # Ensure a CRF instance exists for seq2seq evaluation
-    global crf
-    if crf is None:
-        # try to infer number of tags
-        num_tags = None
-        if isinstance(getattr(args, "model_config", None), dict):
-            num_tags = args.model_config.get("num_labels") or args.model_config.get("output_size")
-        if num_tags is None and hasattr(model, "fc3"):
-            num_tags = model.fc3.out_features
-        crf = CRF(num_labels=int(num_tags), pad_idx=None, use_gpu=torch.cuda.is_available())
-
-    # If x/y data are not provided, load the cast POS input file and build samples
+    # If x/y data are not provided, load cast POS input files and build samples
     if x_data is None or y_data is None:
         input_file_prefix = getattr(args, "input_file_prefix", "pos_d100")
         split = getattr(args, "split", "test")
 
+        train_file = CAST_INPUT_DIR / f"{input_file_prefix}_train.pkl"
+        test_file = CAST_INPUT_DIR / f"{input_file_prefix}_test.pkl"
         split_file = CAST_INPUT_DIR / f"{input_file_prefix}_{split}.pkl"
+        if not train_file.exists():
+            raise FileNotFoundError(f"POS input file not found: {train_file}")
+        if not test_file.exists():
+            raise FileNotFoundError(f"POS input file not found: {test_file}")
         if not split_file.exists():
             raise FileNotFoundError(f"POS input file not found: {split_file}")
 
+        train_sentences, train_embedding_dim = ReadUPOSInputFile(train_file, limit=None)
+        test_sentences, test_embedding_dim = ReadUPOSInputFile(test_file, limit=None)
         sentences, embedding_dim = ReadUPOSInputFile(split_file, limit=None)
+        if embedding_dim != train_embedding_dim:
+            raise ValueError("Embedding dimension mismatch between train and evaluation split")
+        if embedding_dim != test_embedding_dim:
+            raise ValueError("Embedding dimension mismatch between test and evaluation split")
 
-        # filter sentences by max length and build label mapping
-        filtered = [s for s in sentences if len(s) <= args.max_seq_len]
+        global_max_seq_len = max(
+            max((len(s) for s in train_sentences), default=0),
+            max((len(s) for s in test_sentences), default=0),
+        )
+        if global_max_seq_len <= 0:
+            raise ValueError("No valid sentences found to infer sequence length")
+
         tags = set()
-        for sent in filtered:
+        for sent in train_sentences:
+            for token in sent:
+                if len(token) > 1:
+                    tags.add(token[1])
+        for sent in sentences:
             for token in sent:
                 if len(token) > 1:
                     tags.add(token[1])
         label_to_idx = {tag: i for i, tag in enumerate(sorted(tags))}
 
-        x_data, y_data, masks = build_seq_samples(filtered, embedding_dim, label_to_idx, max_len=args.max_seq_len)
+        x_data, y_data, masks = build_seq_samples(sentences, embedding_dim, label_to_idx, seq_len=global_max_seq_len)
 
     loss_fn = nn.CrossEntropyLoss()
 
     # Optional diagnostics: plot spike rasters and output-layer membrane for first sample
     if getattr(args, "diagnose", False):
         first_x = x_data[:1]
-        spike_seq = spike_encode(first_x, sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
+        first_x_flat = first_x.reshape(first_x.shape[0], -1)
+        spike_seq = spike_encode(first_x_flat.unsqueeze(1), sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
         diagnostics = collect_forward_diagnostics(model, spike_seq)
         spike_fig, _ = plot_layer_spike_trains(diagnostics, sample_index=0, input_spikes=spike_seq)
         output_layer_name = list(diagnostics.keys())[-1]
@@ -490,9 +488,8 @@ NEURON_MODEL = "synaptic"
 parser = argparse.ArgumentParser(description="Train an SNN for token-level POS tagging")
 parser.add_argument("--input_mode", type=str, default="spatial", choices=["spatial", "temporal"], help="Input mode for the SNN [spatial|temporal]")
 parser.add_argument("--limit", type=int, default=None, help="Limit sentence count after dataset preparation (applied separately to train and test)")
-parser.add_argument("--max_seq_len", type=int, default=10, help="Maximum sequence length (sentences longer than this are discarded)")
 parser.add_argument("--input_file_prefix", type=str, default="pos_d100", help="Prefix for input files")
-parser.add_argument("--output_file_prefix", type=str, default="", help="Prefix for output files")
+parser.add_argument("--output_file_prefix", type=str, default="upos_seq", help="Prefix for output files")
 parser.add_argument("--num_hidden_1", type=int, default=256, help="Number of neurons in first hidden layer")
 parser.add_argument("--num_hidden_2", type=int, default=128, help="Number of neurons in second hidden layer")
 parser.add_argument("--sim_steps", type=int, default=20, help="Poisson/SNN simulation steps")
@@ -545,9 +542,12 @@ def save_training_metadata(metadata_path, metadata):
 sent_train_data, embedding_dim = ReadUPOSInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_train.pkl", limit=None)
 sent_test_data, _ = ReadUPOSInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_test.pkl", limit=None)
 
-# Sequence-to-sequence settings: discard sentences longer than MAX_SEQ_LEN and pad the rest
-filtered_train = [s for s in sent_train_data if len(s) <= args.max_seq_len]
-filtered_test = [s for s in sent_test_data if len(s) <= args.max_seq_len]
+# Sequence-to-sequence settings: use global max sentence length across train and test and pad shorter ones
+max_train_len = max((len(s) for s in sent_train_data), default=0)
+max_test_len = max((len(s) for s in sent_test_data), default=0)
+sequence_length = max(max_train_len, max_test_len)
+if sequence_length <= 0:
+    raise ValueError("No valid sentences found in train/test to infer sequence length")
 
 def collect_pos_tags(sentences):
     tags = set()
@@ -558,14 +558,14 @@ def collect_pos_tags(sentences):
     return sorted(tags)
 
 # Build label maps from the filtered sentences
-pos_tags = collect_pos_tags(filtered_train + filtered_test)
+pos_tags = collect_pos_tags(sent_train_data + sent_test_data)
 label_to_idx = {tag: i for i, tag in enumerate(pos_tags)}
 idx_to_label = {i: tag for tag, i in label_to_idx.items()}
 num_labels = len(label_to_idx)
 
-# Build sequence samples (pad to max_seq_len). Apply limit after padding.
-X_train, y_train, train_mask = build_seq_samples(filtered_train, embedding_dim, label_to_idx, max_len=args.max_seq_len)
-X_test, y_test, test_mask = build_seq_samples(filtered_test, embedding_dim, label_to_idx, max_len=args.max_seq_len)
+# Build sequence samples (pad to global sequence length). Apply limit after padding.
+X_train, y_train, train_mask = build_seq_samples(sent_train_data, embedding_dim, label_to_idx, seq_len=sequence_length)
+X_test, y_test, test_mask = build_seq_samples(sent_test_data, embedding_dim, label_to_idx, seq_len=sequence_length)
 
 if args.limit is not None:
     train_limit = min(args.limit, X_train.shape[0])
@@ -576,8 +576,6 @@ if args.limit is not None:
     X_test = X_test[:test_limit]
     y_test = y_test[:test_limit]
     test_mask = test_mask[:test_limit]
-
-sequence_length = X_train.shape[1]
 
 # token-level class counts (only real tokens)
 valid_train_labels = y_train[train_mask]
@@ -600,13 +598,13 @@ print(f"POS tags: {pos_tags}")
 print(f"Train class distribution: {train_class_counts.tolist()}")
 print(f"Test class distribution: {test_class_counts.tolist()}")
 
-# For seq2seq we run the SNN per-token; input size is token embedding dim
-input_size = embedding_dim
+# For seq2seq we run the SNN on a flattened sentence; input size is seq_len * embedding_dim
+input_size = sequence_length * embedding_dim
 net = SequencePOS_SNN(
     input_size,
     args.num_hidden_1,
     args.num_hidden_2,
-    num_labels,
+    sequence_length * num_labels,
     beta=args.beta,
     alpha=alpha,
     learn_alpha=args.learn_alpha,
@@ -617,10 +615,6 @@ net = SequencePOS_SNN(
     learn_threshold=args.learn_threshold,
 )
 
-# This script is seq2seq-only: always initialize linear layer and CRF
-net.init_seq_classifier(hidden_size=net.fc3.out_features, num_tags=num_labels)
-crf = CRF(num_labels=num_labels, pad_idx=None, use_gpu=torch.cuda.is_available())
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 net = net.to(device)
 
@@ -628,13 +622,10 @@ net = net.to(device)
 train_ds = TensorDataset(X_train, y_train, train_mask)
 train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
 
-# Always include seq_linear and CRF parameters in optimizer (seq2seq-only script)
+# Optimize all trainable model parameters
 params = list(net.parameters())
-if getattr(net, "seq_linear", None) is not None:
-    params += list(net.seq_linear.parameters())
-if crf is not None:
-    params += list(crf.parameters())
 optimizer = torch.optim.Adam(params, lr=args.learning_rate)
+loss_fn = nn.CrossEntropyLoss()
 
 total_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
 
@@ -741,9 +732,8 @@ for epoch in range(args.epochs):
         # Optionally run diagnostics on the first token of first batch
         if args.diagnose and not diagnostics_ran:
             with torch.no_grad():
-                first_token = xb[:1, 0, :]
-                # ensure shape [B, seq_len, emb_dim] for spike_encode
-                diag_spike_seq = spike_encode(first_token.unsqueeze(1), args.sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
+                first_sample_flat = xb[:1].reshape(1, -1)
+                diag_spike_seq = spike_encode(first_sample_flat.unsqueeze(1), args.sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
                 diagnostics = collect_forward_diagnostics(net, diag_spike_seq)
 
             sample_index = 0
@@ -763,25 +753,24 @@ for epoch in range(args.epochs):
             output_mem_fig.savefig(output_mem_path, dpi=200, bbox_inches="tight")
 
             plt.close("all")
-            print(f"Diagnostics completed for first training token. Output layer: {output_layer_name}")
+            print(f"Diagnostics completed for first flattened training sample. Output layer: {output_layer_name}")
             diagnostics_ran = True
 
-        # Build emissions per token by running SNN per token
-        emissions_steps = []
-        for t in range(sequence_length):
-            token_emb = xb[:, t, :]
-            # token_emb is [B, emb_dim] — spike_encode expects [B, seq_len, emb_dim]
-            spike_seq_tok = spike_encode(token_emb.unsqueeze(1), args.sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
-            per_step_spikes_tok = net(spike_seq_tok)  # [sim_steps, batch, out]
-            spike_sum_tok = per_step_spikes_tok.sum(dim=0)  # [batch, out]
-            emissions_t = net.seq_linear(spike_sum_tok)  # [batch, num_tags]
-            emissions_steps.append(emissions_t)
+        batch_size_eff = xb.shape[0]
+        xb_flat = xb.reshape(batch_size_eff, -1)
+        spike_seq = spike_encode(
+            xb_flat.unsqueeze(1),
+            args.sim_steps,
+            input_mode=input_mode,
+            encoding_method=encoding_method,
+        ).to(device)
+        per_step_spikes = net(spike_seq)  # [sim_steps, batch, seq_len * num_labels]
+        spike_sum = per_step_spikes.sum(dim=0)  # [batch, seq_len * num_labels]
+        emissions = spike_sum.view(batch_size_eff, sequence_length, num_labels)  # [batch, seq_len, num_labels]
 
-        emissions = torch.stack(emissions_steps, dim=1)  # [batch, seq_len, num_tags]
-
-        # CRF loss (mask indicates real tokens)
-        log_likelihood = crf(emissions, yb, mask=mb)
-        loss = -log_likelihood.mean()
+        valid_emissions = emissions[mb]
+        valid_labels = yb[mb]
+        loss = loss_fn(valid_emissions, valid_labels)
 
         optimizer.zero_grad()
         loss.backward()
@@ -848,7 +837,7 @@ if args.save:
             "input_size": input_size,
             "hidden_size_1": args.num_hidden_1,
             "hidden_size_2": args.num_hidden_2,
-            "output_size": num_labels,
+            "output_size": sequence_length * num_labels,
             "beta": args.beta,
             "alpha": alpha,
             "input_mode": input_mode,
@@ -879,6 +868,7 @@ if args.eval:
     args.model = net
     args.x_data = X_test
     args.y_data = y_test
+    args.masks = test_mask
     args.model_config = training_metadata["training_config"]
     args.cli_args = args
     args.checkpoint = checkpoint

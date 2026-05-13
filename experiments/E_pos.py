@@ -348,9 +348,10 @@ for epoch in range(args.epochs):
     avg_epoch_s = elapsed_s / float(epoch + 1)
     remaining_epochs = max(0, args.epochs - (epoch + 1))
     eta_minutes = (avg_epoch_s * remaining_epochs) / 60.0
+    total_elapsed_minutes = elapsed_s / 60.0
     print(
         f"Epoch {epoch + 1}/{args.epochs} | loss: {epoch_loss:.4f} | acc: {epoch_acc:.4f} "
-        f"| epoch_time_s: {epoch_duration_s:.2f} | eta_min: {eta_minutes:.2f}"
+        f"| epoch_time_s: {epoch_duration_s:.2f} | elapsed_min: {total_elapsed_minutes:.2f} | remaining_min: {eta_minutes:.2f}"
     )
 
 print("Training finished.")
