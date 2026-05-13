@@ -95,10 +95,10 @@ $epochs = 50
 # python experiments/E_sent_ann-mlp.py --input_file_prefix "sent_d25" --output_file_prefix "ann_mlp_25d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
 # python experiments/E_sent_ann-mlp.py --input_file_prefix "sent_d100" --output_file_prefix "ann_mlp_100d" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
 
-python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d25" --output_file_prefix "ann_lstm_25" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
-python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d50" --output_file_prefix "ann_lstm_50" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
-python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d100" --output_file_prefix "ann_lstm_100" --lstm_bidirectional False --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
-python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d100" --output_file_prefix "ann_bilstm_100" --lstm_bidirectional True --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+# python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d25" --output_file_prefix "ann_lstm_25" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+# python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d50" --output_file_prefix "ann_lstm_50" --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+# python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d100" --output_file_prefix "ann_lstm_100" --lstm_bidirectional False --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
+# python experiments/E_sent_ann-lstm.py --input_file_prefix "sent_d100" --output_file_prefix "ann_bilstm_100" --lstm_bidirectional True --limit $limit --learning_rate $lr --batch_size $batch_size --epochs $epochs --save --eval
 
 
 # neuron model

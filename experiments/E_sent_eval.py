@@ -327,9 +327,11 @@ def evaluate_model(args:Namespace) -> dict:
 		model_config = checkpoint["model_config"]
 		cli_args = checkpoint.get("cli_args", {})
 
-	input_mode = (args.input_mode or model_config.get("input_mode") or "spatial").lower()
-	encoding_method = (args.encoding_method or model_config.get("encoding_method") or "poisson").lower()
-	decoding_method = (args.decoding_method or model_config.get("decoding_method") or "spike_count").lower()
+	input_mode = (args.input_mode or model_config.get("input_mode")).lower()
+	encoding_method = (args.encoding_method or model_config.get("encoding_method")).lower()
+	decoding_method = (args.decoding_method or model_config.get("decoding_method")).lower()
+	if not input_mode or not encoding_method or not decoding_method:
+		raise ValueError("Input mode, encoding method, and decoding method must be specified either as args or in the checkpoint cli_args/model_config")
 	ttfs_temporal_loss_name = (
 		args.ttfs_temporal_loss
 		or cli_args.get("ttfs_temporal_loss")
