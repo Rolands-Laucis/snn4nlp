@@ -46,7 +46,7 @@ parser.add_argument("--epochs", type=int, default=1, help="Number of training ep
 parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
 parser.add_argument("--save", action="store_true", help="Whether to save the model checkpoint")
 parser.add_argument("--eval", action="store_true", help="Whether to evaluate the model")
-parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "output_results" / "E_pos"), help="Output directory for checkpoint and metadata")
+parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "output_results" / "E_pos" / "win-snn"), help="Output directory for checkpoint and metadata")
 parser.add_argument("--diagnose", action="store_true", help="Run first-batch SNN diagnostics and generate plots")
 parser.add_argument(
     "--diagnose_dir",
