@@ -92,23 +92,13 @@ def estimate_batch_ac_operations(model, spike_seq):
     dtype = torch.float32
     running_ac_ops = torch.zeros(batch_size, device=device, dtype=dtype)
 
-    neuron_class1 = model.lif1.__class__.__name__
-    neuron_class2 = model.lif2.__class__.__name__
-    neuron_class3 = model.lif3.__class__.__name__
-
     mem1 = torch.zeros(batch_size, model.fc1.out_features, device=device, dtype=spike_seq.dtype)
     mem2 = torch.zeros(batch_size, model.fc2.out_features, device=device, dtype=spike_seq.dtype)
     mem3 = torch.zeros(batch_size, model.fc3.out_features, device=device, dtype=spike_seq.dtype)
 
-    syn1 = None
-    syn2 = None
-    syn3 = None
-    if neuron_class1 in ("Synaptic", "QLIF"):
-        syn1 = torch.zeros(batch_size, model.fc1.out_features, device=device, dtype=spike_seq.dtype)
-    if neuron_class2 in ("Synaptic", "QLIF"):
-        syn2 = torch.zeros(batch_size, model.fc2.out_features, device=device, dtype=spike_seq.dtype)
-    if neuron_class3 in ("Synaptic", "QLIF"):
-        syn3 = torch.zeros(batch_size, model.fc3.out_features, device=device, dtype=spike_seq.dtype)
+    syn1 = torch.zeros(batch_size, model.fc1.out_features, device=device, dtype=spike_seq.dtype)
+    syn2 = torch.zeros(batch_size, model.fc2.out_features, device=device, dtype=spike_seq.dtype)
+    syn3 = torch.zeros(batch_size, model.fc3.out_features, device=device, dtype=spike_seq.dtype)
 
     with torch.no_grad():
         for step in range(spike_seq.shape[0]):
@@ -116,26 +106,17 @@ def estimate_batch_ac_operations(model, spike_seq):
             running_ac_ops += input_spikes.sum(dim=1).to(dtype) * float(model.fc1.out_features)
 
             cur1 = model.fc1(input_spikes)
-            if neuron_class1 in ("Synaptic", "QLIF"):
-                spk1, syn1, mem1 = model.lif1(cur1, syn1, mem1)
-            else:
-                spk1, mem1 = model.lif1(cur1, mem1)
+            spk1, syn1, mem1 = model.lif1(cur1, syn1, mem1)
 
             running_ac_ops += spk1.sum(dim=1).to(dtype) * float(model.fc2.out_features)
 
             cur2 = model.fc2(spk1)
-            if neuron_class2 in ("Synaptic", "QLIF"):
-                spk2, syn2, mem2 = model.lif2(cur2, syn2, mem2)
-            else:
-                spk2, mem2 = model.lif2(cur2, mem2)
+            spk2, syn2, mem2 = model.lif2(cur2, syn2, mem2)
 
             running_ac_ops += spk2.sum(dim=1).to(dtype) * float(model.fc3.out_features)
 
             cur3 = model.fc3(spk2)
-            if neuron_class3 in ("Synaptic", "QLIF"):
-                spk3, syn3, mem3 = model.lif3(cur3, syn3, mem3)
-            else:
-                spk3, mem3 = model.lif3(cur3, mem3)
+            spk3, syn3, mem3 = model.lif3(cur3, syn3, mem3)
 
     return running_ac_ops
 
@@ -165,8 +146,7 @@ def evaluate_batches(
     running_loss = 0.0
     running_correct = 0
     running_total = 0
-    running_ac_ops = 0.0
-    running_energy_pj = 0.0
+    running_ac_ops = 0
 
     # print(f"Evaluating on {len(eval_ds)} samples with batch_size={batch_size} and n_steps={n_steps}...")
 
@@ -184,8 +164,7 @@ def evaluate_batches(
 
             if estimate_energy:
                 batch_ac_ops, batch_energy_pj = estimate_batch_energy(model, spike_seq, eac_pj)
-                running_ac_ops += float(batch_ac_ops.sum().item())
-                running_energy_pj += float(batch_energy_pj.sum().item())
+                running_ac_ops += int(batch_ac_ops.sum().item())
 
             spike_counts = model(spike_seq)
             loss = compute_classification_loss(loss_fn, yb, spike_counts=spike_counts)
@@ -198,7 +177,7 @@ def evaluate_batches(
     avg_loss = running_loss / max(1, running_total)
     avg_acc = running_correct / max(1, running_total)
     avg_ac_ops = running_ac_ops / max(1, running_total) if estimate_energy else None
-    avg_energy_pj = running_energy_pj / max(1, running_total) if estimate_energy else None
+    avg_energy_pj = (avg_ac_ops * eac_pj) if estimate_energy else None
     return avg_loss, avg_acc, avg_ac_ops, avg_energy_pj
 
 
