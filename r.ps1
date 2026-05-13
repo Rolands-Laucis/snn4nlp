@@ -132,8 +132,8 @@ $alpha = 0.94 # best performance was with both equal, but that kinda reduces it 
 
 # MODELS
 # python experiments/E_pos.py --diagnose --input_mode "spatial" --encoding_method "latency" --output_file_prefix "diag" --epochs 1 --beta $beta --sim_steps $sim_steps --limit 20000 --learning_rate $lr --batch_size 64
-# python experiments/E_pos.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "upos" --epochs $epochs --beta $beta --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
-# python experiments/E_pos.py --save --eval --input_mode "temporal" --encoding_method "latency" --output_file_prefix "upos" --epochs $epochs --beta $beta --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
+# python experiments/E_pos.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "upos-win-snn" --epochs $epochs --beta $beta --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
+# python experiments/E_pos.py --save --eval --input_mode "temporal" --encoding_method "latency" --output_file_prefix "upos-win-snn" --epochs $epochs --beta $beta --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
 
 # for POS also test spatial vs temporal input with shuffled token order in eval on trained models to see if either degrades and by how much, which would indicate whether temporal actually inputs token order implicitly
 # python experiments/E_pos_eval.py --shuffle_context_window --input_mode "spatial" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-02_17-32-33_e-50_s-20_spatial.pt"
