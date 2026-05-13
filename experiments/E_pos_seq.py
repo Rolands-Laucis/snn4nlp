@@ -7,126 +7,18 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import snntorch as snn
 import torch
 import torch.nn as nn
-import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader, TensorDataset
 
-from E_pos_seq_model import SequencePOS_SNN as SharedSequencePOS_SNN
+from E_pos_seq_model import SequencePOS_SNN
 from E_pos_seq_shared import build_seq_samples as shared_build_seq_samples
 from E_pos_seq_shared import evaluate_model as shared_evaluate_model
 from readers import ReadUPOSInputFile
-from snn_util import spike_encode, get_neuron_beta_values_by_layer, parse_threshold_layer_scalars
-from snn_diagnostics import collect_forward_diagnostics, plot_layer_spike_trains, plot_layer_membrane_traces
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAST_INPUT_DIR = PROJECT_ROOT / "input_data" / "cast_pos"
 
-class SequencePOS_SNN(nn.Module):
-    def __init__(
-        self,
-        input_size,
-        hidden_size_1,
-        hidden_size_2,
-        output_size,
-        beta=None,
-        alpha=None,
-        learn_alpha=False,
-        learn_beta=False,
-        threshold=None,
-        threshold_layer_scalars=None,
-        per_neuron_params=False,
-        learn_threshold=False,
-    ):
-        super().__init__()
-
-        self.fc1 = nn.Linear(input_size, hidden_size_1)
-        self.fc2 = nn.Linear(hidden_size_1, hidden_size_2)
-        self.fc3 = nn.Linear(hidden_size_2, output_size)
-
-        if threshold is None and not learn_threshold:
-            threshold = 1.0
-
-        if threshold_layer_scalars is None:
-            threshold_layer_scalars = [1.0, 1.0, 1.0]
-
-        def make_param(value, size):
-            if value is None:
-                return None
-            if per_neuron_params:
-                return torch.full((size,), float(value))
-            return float(value)
-
-        alpha_1 = make_param(alpha, hidden_size_1)
-        beta_1 = make_param(beta, hidden_size_1)
-        alpha_2 = make_param(alpha, hidden_size_2)
-        beta_2 = make_param(beta, hidden_size_2)
-        alpha_3 = make_param(alpha, output_size)
-        beta_3 = make_param(beta, output_size)
-
-        thr1 = torch.rand(hidden_size_1) if threshold is None else float(threshold) * threshold_layer_scalars[0]
-        thr2 = torch.rand(hidden_size_2) if threshold is None else float(threshold) * threshold_layer_scalars[1]
-        thr3 = torch.rand(output_size) if threshold is None else float(threshold) * threshold_layer_scalars[2]
-
-        self.lif1 = snn.Synaptic(
-            alpha=alpha_1,
-            beta=beta_1,
-            threshold=thr1,
-            learn_alpha=learn_alpha,
-            learn_beta=learn_beta,
-            learn_threshold=learn_threshold,
-            reset_mechanism="zero",
-        )
-        self.lif2 = snn.Synaptic(
-            alpha=alpha_2,
-            beta=beta_2,
-            threshold=thr2,
-            learn_alpha=learn_alpha,
-            learn_beta=learn_beta,
-            learn_threshold=learn_threshold,
-            reset_mechanism="zero",
-        )
-        self.lif3 = snn.Synaptic(
-            alpha=alpha_3,
-            beta=beta_3,
-            threshold=thr3,
-            learn_alpha=learn_alpha,
-            learn_beta=learn_beta,
-            learn_threshold=learn_threshold,
-            reset_mechanism="zero",
-        )
-
-        # seq classifier head (initialized on demand)
-        self.seq_linear = None
-
-    def init_seq_classifier(self, hidden_size, num_tags):
-        self.seq_linear = nn.Linear(hidden_size, num_tags)
-
-    def forward(self, spike_seq, track_ttfs: bool = False):
-        syn1, mem1 = self.lif1.init_synaptic()
-        syn2, mem2 = self.lif2.init_synaptic()
-        syn3, mem3 = self.lif3.init_synaptic()
-
-        per_step_outputs = []
-
-        for step in range(spike_seq.size(0)):
-            x = spike_seq[step]
-            cur1 = self.fc1(x)
-            spk1, syn1, mem1 = self.lif1(cur1, syn1, mem1)
-
-            cur2 = self.fc2(spk1)
-            spk2, syn2, mem2 = self.lif2(cur2, syn2, mem2)
-
-            cur3 = self.fc3(spk2)
-            spk3, syn3, mem3 = self.lif3(cur3, syn3, mem3)
-
-            per_step_outputs.append(spk3)
-
-        # return shape [sim_steps, batch, output_size]
-        return torch.stack(per_step_outputs, dim=0)
-
-# End local SequencePOS_SNN definition — keeps this script independent from external changes
 
 def build_seq_samples(
     sentences: list[list[list[Any]]],
@@ -363,10 +255,7 @@ def evaluate_model(args: Namespace) -> dict:
     model = model.to(device)
     model.eval()
 
-    input_mode = getattr(args, "input_mode", "spatial").lower()
-    encoding_method = getattr(args, "encoding_method", "poisson").lower()
     batch_size = getattr(args, "batch_size", 32)
-    sim_steps = getattr(args, "sim_steps", 20)
     estimate_energy = getattr(args, "estimate_energy", False)
     eac_pj = getattr(args, "energy_ac_cost_pj", 25.63)
 
@@ -415,20 +304,6 @@ def evaluate_model(args: Namespace) -> dict:
 
         x_data, y_data, masks = build_seq_samples(sentences, embedding_dim, label_to_idx, seq_len=global_max_seq_len)
 
-    loss_fn = nn.CrossEntropyLoss()
-
-    # Optional diagnostics: plot spike rasters and output-layer membrane for first sample
-    if getattr(args, "diagnose", False):
-        first_x = x_data[:1]
-        first_x_flat = first_x.reshape(first_x.shape[0], -1)
-        spike_seq = spike_encode(first_x_flat.unsqueeze(1), sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
-        diagnostics = collect_forward_diagnostics(model, spike_seq)
-        spike_fig, _ = plot_layer_spike_trains(diagnostics, sample_index=0, input_spikes=spike_seq)
-        output_layer_name = list(diagnostics.keys())[-1]
-        mem_fig, _ = plot_layer_membrane_traces(diagnostics, layer_name=output_layer_name, sample_index=0)
-        plt.show()
-        return
-
     eval_start = time.perf_counter()
     masks = getattr(args, "masks", None)
     if masks is None:
@@ -441,10 +316,10 @@ def evaluate_model(args: Namespace) -> dict:
         masks=masks,
         batch_size=batch_size,
         device=device,
-        n_steps=sim_steps,
-        input_mode=input_mode,
-        encoding_method=encoding_method,
-        loss_fn=loss_fn,
+        n_steps=None,
+        input_mode=None,
+        encoding_method=None,
+        loss_fn=None,
         estimate_energy=estimate_energy,
         eac_pj=eac_pj,
     )
@@ -601,13 +476,15 @@ print(f"POS tags: {pos_tags}")
 print(f"Train class distribution: {train_class_counts.tolist()}")
 print(f"Test class distribution: {test_class_counts.tolist()}")
 
-# For seq2seq we run the SNN on a flattened sentence; input size is seq_len * embedding_dim
-input_size = sequence_length * embedding_dim
-net = SharedSequencePOS_SNN(
-    input_size,
-    args.num_hidden_1,
-    args.num_hidden_2,
-    sequence_length * num_labels,
+# Create SNN+CRF model: processes token embeddings sequentially
+net = SequencePOS_SNN(
+    emb_dim=embedding_dim,
+    hidden_size_1=args.num_hidden_1,
+    hidden_size_2=args.num_hidden_2,
+    num_tags=num_labels,
+    n_steps=args.sim_steps,
+    input_mode=input_mode,
+    encoding_method=encoding_method,
     beta=args.beta,
     alpha=alpha,
     learn_alpha=args.learn_alpha,
@@ -628,7 +505,7 @@ train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
 # Optimize all trainable model parameters
 params = list(net.parameters())
 optimizer = torch.optim.Adam(params, lr=args.learning_rate)
-loss_fn = nn.CrossEntropyLoss()
+# CRF loss is computed internally by the model
 
 total_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
 
@@ -641,8 +518,6 @@ run_filename_base = "_".join(
         args.output_file_prefix or "pos",
         now,
         f"e-{args.epochs}",
-        f"s-{args.sim_steps}",
-        input_mode,
     ]
 )
 
@@ -653,10 +528,9 @@ training_metadata = {
         "training_start_date": training_start_date.strftime("%Y-%m-%d %H:%M:%S"),
         "training_end_date": None,
         "training_duration_s": None,
-        "task": "seq2seq_pos",
+        "task": "seq_pos_crf",
         "embedding_dim": int(embedding_dim),
         "sequence_length": int(sequence_length),
-        "input_size": int(input_size),
         "num_labels": num_labels,
         "num_training_samples": int(X_train.shape[0]),
         "num_test_samples": int(X_test.shape[0]),
@@ -699,7 +573,7 @@ print(f"  Alpha: {alpha}")
 print(f"  Per-neuron params: {args.per_neuron_params}")
 print(f"  Sequence length: {sequence_length}")
 print(f"  Embedding dim: {embedding_dim}")
-print(f"  Input size: {input_size}")
+print(f"  Input size: {embedding_dim}")
 print(f"  Hidden size 1: {args.num_hidden_1}")
 print(f"  Hidden size 2: {args.num_hidden_2}")
 print(f"  Output classes: {num_labels}")
@@ -728,72 +602,41 @@ for epoch in range(args.epochs):
     diagnostics_ran = False
 
     for xb, yb, mb in train_loader:
-        xb = xb.to(device)
-        yb = yb.to(device)
-        mb = mb.to(device)
-
-        # Optionally run diagnostics on the first token of first batch
-        if args.diagnose and not diagnostics_ran:
-            with torch.no_grad():
-                first_sample_flat = xb[:1].reshape(1, -1)
-                diag_spike_seq = spike_encode(first_sample_flat.unsqueeze(1), args.sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
-                diagnostics = collect_forward_diagnostics(net, diag_spike_seq)
-
-            sample_index = 0
-            diag_filename = "_".join([
-                args.output_file_prefix or "pos",
-                f"e-{epoch}",
-                f's-{sample_index}'
-            ])
-
-            spike_fig, _ = plot_layer_spike_trains(diagnostics, sample_index=0, input_spikes=diag_spike_seq)
-            spike_path = diagnose_dir / f"{diag_filename}_layer_spike_trains.png"
-            spike_fig.savefig(spike_path, dpi=200, bbox_inches="tight")
-
-            output_layer_name = list(diagnostics.keys())[-1]
-            output_mem_fig, _ = plot_layer_membrane_traces(diagnostics, layer_name=output_layer_name, sample_index=0)
-            output_mem_path = diagnose_dir / f"{diag_filename}_{output_layer_name}_membranes.png"
-            output_mem_fig.savefig(output_mem_path, dpi=200, bbox_inches="tight")
-
-            plt.close("all")
-            print(f"Diagnostics completed for first flattened training sample. Output layer: {output_layer_name}")
-            diagnostics_ran = True
+        xb = xb.to(device)  # (batch, seq_len, emb_dim)
+        yb = yb.to(device)  # (batch, seq_len)
+        mb = mb.to(device)  # (batch, seq_len)
 
         batch_size_eff = xb.shape[0]
-        xb_flat = xb.reshape(batch_size_eff, -1)
-        spike_seq = spike_encode(
-            xb_flat.unsqueeze(1),
-            args.sim_steps,
-            input_mode=input_mode,
-            encoding_method=encoding_method,
-        ).to(device)
-        per_step_spikes = net(spike_seq)  # [sim_steps, batch, seq_len * num_labels]
-        spike_sum = per_step_spikes.sum(dim=0)  # [batch, seq_len * num_labels]
-        emissions = spike_sum.view(batch_size_eff, sequence_length, num_labels)  # [batch, seq_len, num_labels]
+        
+        # Forward pass: CRF loss is computed internally
+        loss = net(xb, tags=yb, mask=mb)
+        
+        # Get predictions via CRF Viterbi decoding
+        preds = net(xb, mask=mb)  # list[list[int]]
+        
+        # Convert predictions to tensor for accuracy
+        preds_tensor = torch.zeros_like(yb)
+        for i, pred_seq in enumerate(preds):
+            pred_len = min(len(pred_seq), sequence_length)
+            preds_tensor[i, :pred_len] = torch.tensor(pred_seq[:pred_len], device=device, dtype=torch.long)
 
-        valid_emissions = emissions[mb]
-        valid_labels = yb[mb]
-        loss = loss_fn(valid_emissions, valid_labels)
+        # Compute accuracy on real tokens only
+        running_correct_tokens += int(((preds_tensor == yb) & mb).sum().item())
+        running_total_tokens += int(mb.sum().item())
+        running_loss += (-loss).item() * batch_size_eff
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        # token-level bookkeeping
-        valid_tokens = mb.sum().item()
-        running_loss += loss.item() * valid_tokens
-        preds = emissions.argmax(dim=-1)
-        running_correct_tokens += int(((preds == yb) & mb).sum().item())
-        running_total_tokens += valid_tokens
-
-        # progress by samples
-        running_total = min(epoch_total_samples, (running_total_tokens // sequence_length))
+        # progress by tokens
+        running_total = min(epoch_total_samples, running_total_tokens)
         while running_total >= next_progress_print_at:
             progress_pct = (running_total / max(1, epoch_total_samples)) * 100.0
             epoch_elapsed_s = time.perf_counter() - epoch_start_time
             print(
                 f"Epoch {epoch + 1}/{args.epochs} progress | "
-                f"samples: {running_total}/{epoch_total_samples} ({progress_pct:.2f}%) | "
+                f"tokens: {running_total}/{epoch_total_samples} ({progress_pct:.2f}%) | "
                 f"elapsed_s: {epoch_elapsed_s:.2f}"
             )
             next_progress_print_at += progress_print_every_samples
@@ -826,9 +669,6 @@ if args.diagnose:
     exit(0)
 
 learned_beta_values_by_layer = None
-if args.learn_beta:
-    learned_beta_values_by_layer = get_neuron_beta_values_by_layer(net) if args.learn_beta else None
-    training_metadata["results"]["learned_beta_values_by_layer"] = learned_beta_values_by_layer
 
 checkpoint = None
 if args.save:
@@ -837,19 +677,19 @@ if args.save:
         "model_state_dict": net.state_dict(),
         "model_class": "SequencePOS_SNN",
         "model_config": {
-            "input_size": input_size,
+            "embedding_dim": int(embedding_dim),
             "hidden_size_1": args.num_hidden_1,
             "hidden_size_2": args.num_hidden_2,
-            "output_size": sequence_length * num_labels,
-            "beta": args.beta,
-            "alpha": alpha,
+            "num_labels": num_labels,
+            "n_steps": int(args.sim_steps),
             "input_mode": input_mode,
             "encoding_method": encoding_method,
+            "beta": args.beta,
+            "alpha": alpha,
             "decoding_method": DECODING_METHOD,
             "neuron_model": NEURON_MODEL,
             "sequence_length": int(sequence_length),
             "embedding_dim": int(embedding_dim),
-            "sim_steps": args.sim_steps,
         },
         "label_maps": {
             "label_to_idx": label_to_idx,

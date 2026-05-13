@@ -63,71 +63,42 @@ def compute_classification_loss(loss_fn, y_true: torch.Tensor, spike_counts: tor
     return loss_fn(spike_counts, y_true)
 
 
-def estimate_batch_ac_operations(model, spike_seq):
-    if spike_seq.ndim != 3:
-        raise ValueError(f"spike_seq must be rank-3 [T, B, input_size], got {tuple(spike_seq.shape)}")
+def estimate_batch_ac_operations(model, x_emb):
+    """Estimate AC operations for a batch of embeddings."""
+    if x_emb.ndim != 3:
+        raise ValueError(f"x_emb must be rank-3 [batch, seq_len, emb_dim], got {tuple(x_emb.shape)}")
 
     if not all(hasattr(model, name) for name in ("fc1", "fc2", "fc3", "lif1", "lif2", "lif3")):
         raise ValueError("Energy estimation expects fc1/lif1/fc2/lif2/fc3/lif3 model structure")
 
-    batch_size = spike_seq.shape[1]
-    device = spike_seq.device
+    batch_size, seq_len, emb_dim = x_emb.shape
+    device = x_emb.device
     dtype = torch.float32
     running_ac_ops = torch.zeros(batch_size, device=device, dtype=dtype)
 
-    neuron_class1 = model.lif1.__class__.__name__
-    neuron_class2 = model.lif2.__class__.__name__
-    neuron_class3 = model.lif3.__class__.__name__
-
-    mem1 = torch.zeros(batch_size, model.fc1.out_features, device=device, dtype=spike_seq.dtype)
-    mem2 = torch.zeros(batch_size, model.fc2.out_features, device=device, dtype=spike_seq.dtype)
-    mem3 = torch.zeros(batch_size, model.fc3.out_features, device=device, dtype=spike_seq.dtype)
-
-    syn1 = None
-    syn2 = None
-    syn3 = None
-    if neuron_class1 in ("Synaptic", "QLIF"):
-        syn1 = torch.zeros(batch_size, model.fc1.out_features, device=device, dtype=spike_seq.dtype)
-    if neuron_class2 in ("Synaptic", "QLIF"):
-        syn2 = torch.zeros(batch_size, model.fc2.out_features, device=device, dtype=spike_seq.dtype)
-    if neuron_class3 in ("Synaptic", "QLIF"):
-        syn3 = torch.zeros(batch_size, model.fc3.out_features, device=device, dtype=spike_seq.dtype)
+    # Initialize SNN state
+    syn1, mem1 = model.lif1.init_synaptic()
+    syn2, mem2 = model.lif2.init_synaptic()
+    syn3, mem3 = model.lif3.init_synaptic()
 
     with torch.no_grad():
-        for step in range(spike_seq.shape[0]):
-            input_spikes = spike_seq[step]
-            running_ac_ops += input_spikes.sum(dim=1).to(dtype) * float(model.fc1.out_features)
-
-            cur1 = model.fc1(input_spikes)
-            if neuron_class1 in ("Synaptic", "QLIF"):
-                spk1, syn1, mem1 = model.lif1(cur1, syn1, mem1)
-            else:
-                spk1, mem1 = model.lif1(cur1, mem1)
-
+        # Process each token sequentially
+        for t in range(seq_len):
+            x_t = x_emb[:, t, :]
+            
+            cur1 = model.fc1(x_t)
+            spk1, syn1, mem1 = model.lif1(cur1, syn1, mem1)
             running_ac_ops += spk1.sum(dim=1).to(dtype) * float(model.fc2.out_features)
 
             cur2 = model.fc2(spk1)
-            if neuron_class2 in ("Synaptic", "QLIF"):
-                spk2, syn2, mem2 = model.lif2(cur2, syn2, mem2)
-            else:
-                spk2, mem2 = model.lif2(cur2, mem2)
-
+            spk2, syn2, mem2 = model.lif2(cur2, syn2, mem2)
             running_ac_ops += spk2.sum(dim=1).to(dtype) * float(model.fc3.out_features)
 
             cur3 = model.fc3(spk2)
-            if neuron_class3 in ("Synaptic", "QLIF"):
-                spk3, syn3, mem3 = model.lif3(cur3, syn3, mem3)
-            else:
-                spk3, mem3 = model.lif3(cur3, mem3)
+            spk3, syn3, mem3 = model.lif3(cur3, syn3, mem3)
+            running_ac_ops += spk3.sum(dim=1).to(dtype) * float(model.linear_out.out_features)
 
     return running_ac_ops
-
-
-def estimate_batch_energy(model, spike_seq, eac_pj):
-    per_sample_ac_ops = estimate_batch_ac_operations(model, spike_seq)
-    per_sample_energy_pj = per_sample_ac_ops * float(eac_pj)
-    return per_sample_ac_ops, per_sample_energy_pj
-
 
 def evaluate_batches(
     model,
@@ -136,61 +107,65 @@ def evaluate_batches(
     masks,
     batch_size,
     device,
-    n_steps,
-    input_mode,
-    encoding_method,
-    loss_fn,
+    n_steps=None,
+    input_mode=None,
+    encoding_method=None,
+    loss_fn=None,
     estimate_energy=False,
     eac_pj=25.63,
 ):
+    """
+    Evaluate the SNN+CRF model on embeddings (not spike-encoded).
+    
+    Parameters
+    ----------
+    features : (N, seq_len, emb_dim)
+        Token embeddings
+    labels : (N, seq_len)
+        Gold tag indices
+    masks : (N, seq_len)
+        Boolean mask for real tokens
+    Legacy parameters (n_steps, input_mode, encoding_method, loss_fn): ignored
+    """
     eval_ds = TensorDataset(features, labels, masks)
     eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False)
 
     running_loss = 0.0
     running_correct_tokens = 0
     running_total_tokens = 0
-    running_ac_ops = 0.0
-    running_energy_pj = 0.0
+    running_ac_ops = 0
 
     with torch.no_grad():
         for xb, yb, mb in eval_loader:
-            xb = xb.to(device)
-            yb = yb.to(device)
-            mb = mb.to(device)
+            xb = xb.to(device)  # (batch, seq_len, emb_dim)
+            yb = yb.to(device)  # (batch, seq_len)
+            mb = mb.to(device)  # (batch, seq_len)
 
-            batch_size_eff, seq_len_eff, _ = xb.shape
-            xb_flat = xb.reshape(batch_size_eff, -1)
-            spike_seq = spike_encode(
-                xb_flat.unsqueeze(1),
-                n_steps,
-                input_mode=input_mode,
-                encoding_method=encoding_method,
-            ).to(device)
+            # Forward pass: CRF loss computed internally
+            loss = model(xb, tags=yb, mask=mb)
+            running_loss += (-loss).item() * int(yb.shape[0])
+
+            # Get predictions via CRF Viterbi decoding
+            preds = model(xb, mask=mb)  # list[list[int]]
+            
+            # Convert predictions to tensor for accuracy
+            preds_tensor = torch.zeros_like(yb)
+            for i, pred_seq in enumerate(preds):
+                pred_len = min(len(pred_seq), yb.shape[1])
+                preds_tensor[i, :pred_len] = torch.tensor(pred_seq[:pred_len], device=device, dtype=torch.long)
+
+            # Compute accuracy on real tokens only
+            running_correct_tokens += int(((preds_tensor == yb) & mb).sum().item())
+            running_total_tokens += int(mb.sum().item())
 
             if estimate_energy:
-                batch_ac_ops, batch_energy_pj = estimate_batch_energy(model, spike_seq, eac_pj)
-                running_ac_ops += float(batch_ac_ops.sum().item())
-                running_energy_pj += float(batch_energy_pj.sum().item())
+                batch_ac_ops = estimate_batch_ac_operations(model, xb)
+                running_ac_ops += int(batch_ac_ops.sum().item())
 
-            per_step_spikes = model(spike_seq)
-            spike_sum = per_step_spikes.sum(dim=0)
-            emissions = spike_sum.view(batch_size_eff, seq_len_eff, -1)
-
-            valid_emissions = emissions[mb]
-            valid_labels = yb[mb]
-            if valid_labels.numel() == 0:
-                continue
-
-            loss = loss_fn(valid_emissions, valid_labels)
-            running_loss += loss.item() * int(valid_labels.numel())
-            preds = emissions.argmax(dim=-1)
-            running_correct_tokens += int(((preds == yb) & mb).sum().item())
-            running_total_tokens += int(valid_labels.numel())
-
-    avg_loss = running_loss / max(1, running_total_tokens)
-    avg_acc = running_correct_tokens / max(1, running_total_tokens)
+    avg_loss = running_loss / max(1, running_total_tokens) if running_total_tokens > 0 else 0.0
+    avg_acc = running_correct_tokens / max(1, running_total_tokens) if running_total_tokens > 0 else 0.0
     avg_ac_ops = running_ac_ops / max(1, running_total_tokens) if estimate_energy else None
-    avg_energy_pj = running_energy_pj / max(1, running_total_tokens) if estimate_energy else None
+    avg_energy_pj = (avg_ac_ops * eac_pj) if estimate_energy else None
     return avg_loss, avg_acc, avg_ac_ops, avg_energy_pj
 
 
@@ -202,16 +177,29 @@ def load_model_from_checkpoint(model_path, device):
     model_config = checkpoint["model_config"]
     cli_args = checkpoint.get("cli_args", {})
 
-    threshold_layer_scalars = parse_threshold_layer_scalars(cli_args.get("threshold_layer_scalars"))
+    def _optional_float(value, default=None):
+        if value is None:
+            return default
+        return float(value)
+
+    # Extract parameters
+    embedding_dim = int(model_config.get("embedding_dim", cli_args.get("embedding_dim", 100)))
+    
     model = SequencePOS_SNN(
-        input_size=int(model_config["input_size"]),
-        hidden_size_1=int(model_config["hidden_size_1"]),
-        hidden_size_2=int(model_config["hidden_size_2"]),
-        output_size=int(model_config["output_size"]),
-        beta=model_config.get("beta", cli_args.get("beta")),
-        alpha=model_config.get("alpha", cli_args.get("alpha")),
-        threshold=cli_args.get("threshold"),
-        threshold_layer_scalars=threshold_layer_scalars,
+        emb_dim=embedding_dim,
+        hidden_size_1=int(model_config.get("hidden_size_1", cli_args.get("num_hidden_1", 256))),
+        hidden_size_2=int(model_config.get("hidden_size_2", cli_args.get("num_hidden_2", 128))),
+        num_tags=int(model_config.get("num_labels", cli_args.get("num_labels", 17))),
+        n_steps=int(model_config.get("n_steps", cli_args.get("sim_steps", 20))),
+        input_mode=model_config.get("input_mode", cli_args.get("input_mode", "spatial")),
+        encoding_method=model_config.get("encoding_method", cli_args.get("encoding_method", "latency")),
+        beta=_optional_float(model_config.get("beta", cli_args.get("beta", 0.5)), 0.5),
+        alpha=_optional_float(model_config.get("alpha", cli_args.get("alpha", 0.5)), 0.5),
+        threshold=_optional_float(model_config.get("threshold", cli_args.get("threshold")), None),
+        learn_alpha=bool(model_config.get("learn_alpha", cli_args.get("learn_alpha", False))),
+        learn_beta=bool(model_config.get("learn_beta", cli_args.get("learn_beta", False))),
+        learn_threshold=bool(model_config.get("learn_threshold", cli_args.get("learn_threshold", False))),
+        per_neuron_params=bool(model_config.get("per_neuron_params", cli_args.get("per_neuron_params", False))),
     )
     model.load_state_dict(checkpoint["model_state_dict"])
     model = model.to(device)
@@ -252,16 +240,7 @@ def evaluate_model(args: Namespace) -> dict:
     else:
         model = model.to(device)
         model.eval()
-        if not model_config and hasattr(model, "fc1") and hasattr(model.fc1, "in_features"):
-            model_config = {
-                "input_size": int(model.fc1.in_features),
-                "hidden_size_1": int(model.fc1.out_features),
-                "hidden_size_2": int(model.fc2.out_features),
-                "output_size": int(model.fc3.out_features),
-            }
 
-    input_mode = (getattr(args, "input_mode", None) or model_config.get("input_mode") or cli_args.get("input_mode") or "spatial").lower()
-    encoding_method = (getattr(args, "encoding_method", None) or model_config.get("encoding_method") or cli_args.get("encoding_method") or "poisson").lower()
     batch_size = getattr(args, "batch_size", None)
     if batch_size is None:
         batch_size = int(model_config.get("batch_size", cli_args.get("batch_size", 32)))
@@ -271,14 +250,6 @@ def evaluate_model(args: Namespace) -> dict:
         except Exception:
             batch_size = int(float(batch_size))
 
-    sim_steps = getattr(args, "sim_steps", None)
-    if sim_steps is None:
-        sim_steps = int(model_config.get("sim_steps", cli_args.get("sim_steps", 20)))
-    else:
-        try:
-            sim_steps = int(sim_steps)
-        except Exception:
-            sim_steps = int(float(sim_steps))
     estimate_energy = getattr(args, "estimate_energy", False)
     eac_pj = getattr(args, "energy_ac_cost_pj", 25.63)
 
@@ -308,12 +279,20 @@ def evaluate_model(args: Namespace) -> dict:
 
         x_data, y_data, masks = build_seq_samples(sentences, embedding_dim, label_to_idx, seq_len=seq_len)
 
-    loss_fn = nn.CrossEntropyLoss()
-
     if getattr(args, "diagnose", False):
-        first_x = x_data[:1]
-        first_x_flat = first_x.reshape(first_x.shape[0], -1)
-        spike_seq = spike_encode(first_x_flat.unsqueeze(1), sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
+        token_spike_trains = []
+        sample_embeddings = x_data[:1].to(device)  # [1, seq_len, emb_dim]
+        for token_idx in range(sample_embeddings.shape[1]):
+            token_embeddings = sample_embeddings[:, token_idx, :].unsqueeze(1)  # [1, 1, emb_dim]
+            token_spikes = spike_encode(
+                token_embeddings,
+                n_steps=int(model_config.get("n_steps", cli_args.get("sim_steps", 20))),
+                input_mode=model_config.get("input_mode", cli_args.get("input_mode", "spatial")),
+                encoding_method=model_config.get("encoding_method", cli_args.get("encoding_method", "latency")),
+            )
+            token_spike_trains.append(token_spikes)
+
+        spike_seq = torch.cat(token_spike_trains, dim=0)
         diagnostics = collect_forward_diagnostics(model, spike_seq)
         plot_layer_spike_trains(diagnostics, sample_index=0, input_spikes=spike_seq)
         output_layer_name = list(diagnostics.keys())[-1]
@@ -332,10 +311,6 @@ def evaluate_model(args: Namespace) -> dict:
         masks=masks,
         batch_size=batch_size,
         device=device,
-        n_steps=sim_steps,
-        input_mode=input_mode,
-        encoding_method=encoding_method,
-        loss_fn=loss_fn,
         estimate_energy=estimate_energy,
         eac_pj=eac_pj,
     )
