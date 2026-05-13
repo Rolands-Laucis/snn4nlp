@@ -83,9 +83,9 @@ def main():
 
     # If build_pos_samples returned numpy/tensors without labels mapping, assume labels are integer tensors already.
     # X_train shape: [samples, window_len, embed_dim]
-    sequence_length = X_train.shape[1]
+    window_len = X_train.shape[1]
 
-    input_size = sequence_length * embedding_dim
+    input_size = window_len * embedding_dim
 
     if args.limit is not None:
         train_limit = min(args.limit, X_train.shape[0])
@@ -168,7 +168,7 @@ def main():
             "training_start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "task": "token_level_pos_ann",
             "embedding_dim": int(embedding_dim),
-            "sequence_length": int(sequence_length),
+            "window_len": int(window_len),
             "input_size": int(input_size),
             "num_labels": int(num_labels),
             "device": str(device),

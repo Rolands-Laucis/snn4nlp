@@ -19,18 +19,20 @@ CAST_INPUT_DIR = PROJECT_ROOT / "input_data" / "cast_pos"
 class SequencePOS_SEQ_ANN(nn.Module):
     """Token-level MLP matching the SNN per-token feedforward layers."""
 
-    def __init__(self, emb_dim, hidden_size_1, hidden_size_2, output_size):
+    def __init__(self, input_size, hidden_size_1, hidden_size_2, sequence_length, num_labels):
         super().__init__()
-        self.fc1 = nn.Linear(emb_dim, hidden_size_1)
+        self.sequence_length = sequence_length
+        self.num_labels = num_labels
+        self.fc1 = nn.Linear(input_size, hidden_size_1)
         self.fc2 = nn.Linear(hidden_size_1, hidden_size_2)
-        self.fc3 = nn.Linear(hidden_size_2, output_size)
+        self.fc3 = nn.Linear(hidden_size_2, sequence_length * num_labels)
         self.relu = nn.ReLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.relu(self.fc1(x))
         x = self.relu(self.fc2(x))
         x = self.fc3(x)
-        return x
+        return x.view(x.shape[0], self.sequence_length, self.num_labels)
 
 
 def build_seq_samples(sentences, embedding_dim, label_to_idx, max_len=10):
@@ -126,11 +128,13 @@ def main():
         test_mask = test_mask[:test_limit]
 
     sequence_length = X_train.shape[1]
+    input_size = sequence_length * embedding_dim
 
     print(f"Training samples: {X_train.shape[0]}")
     print(f"Testing samples: {X_test.shape[0]}")
     print(f"X_train shape: {X_train.shape}  # [samples, seq_len, emb_dim]")
     print(f"y_train shape: {y_train.shape}  # [samples, seq_len]")
+    print(f"Input size: {input_size}")
     print(f"POS tag count: {num_labels}")
     print(f"POS tags: {pos_tags}")
 
@@ -138,7 +142,13 @@ def main():
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SequencePOS_SEQ_ANN(embedding_dim, args.num_hidden_1, args.num_hidden_2, num_labels).to(device)
+    model = SequencePOS_SEQ_ANN(
+        input_size,
+        args.num_hidden_1,
+        args.num_hidden_2,
+        sequence_length,
+        num_labels,
+    ).to(device)
 
     valid_train_labels = y_train[train_mask]
     class_counts = torch.bincount(valid_train_labels.flatten(), minlength=num_labels)
@@ -166,7 +176,7 @@ def main():
             "task": "seq2seq_pos_ann",
             "embedding_dim": int(embedding_dim),
             "sequence_length": int(sequence_length),
-            "input_size": int(embedding_dim),
+            "input_size": int(input_size),
             "num_labels": num_labels,
             "num_training_samples": int(X_train.shape[0]),
             "num_test_samples": int(X_test.shape[0]),
@@ -211,9 +221,8 @@ def main():
             mb = mb.to(device)
 
             batch_size = xb.shape[0]
-            xb_flat = xb.view(batch_size * xb.shape[1], xb.shape[2])
-            logits_flat = model(xb_flat)
-            emissions = logits_flat.view(batch_size, xb.shape[1], -1)
+            xb_flat = xb.view(batch_size, -1)
+            emissions = model(xb_flat)
 
             flat_logits = emissions.reshape(-1, num_labels)
             flat_labels = yb.reshape(-1)
@@ -253,10 +262,13 @@ def main():
             "model_state_dict": model.state_dict(),
             "model_class": "SequencePOS_SEQ_ANN",
             "model_config": {
-                "emb_dim": embedding_dim,
+                "input_size": input_size,
+                "sequence_length": sequence_length,
+                "embedding_dim": embedding_dim,
                 "hidden_size_1": args.num_hidden_1,
                 "hidden_size_2": args.num_hidden_2,
-                "output_size": num_labels,
+                "output_size": sequence_length * num_labels,
+                "num_labels": num_labels,
             },
             "label_maps": {"label_to_idx": label_to_idx, "idx_to_label": idx_to_label},
             "metrics": {
@@ -277,9 +289,8 @@ def main():
             xb = X_test.to(device)
             yb = y_test.to(device)
             mb = test_mask.to(device)
-            xb_flat = xb.view(batch_size * xb.shape[1], xb.shape[2])
-            logits_flat = model(xb_flat)
-            emissions = logits_flat.view(batch_size, xb.shape[1], -1)
+            xb_flat = xb.view(batch_size, -1)
+            emissions = model(xb_flat)
 
             flat_logits = emissions.reshape(-1, num_labels)
             flat_labels = yb.reshape(-1)
