@@ -43,7 +43,7 @@ parser.add_argument("--threshold_layer_scalars", type=str, default="[1, 0.8, 0.7
 parser.add_argument("--learn_threshold", type=bool, default=False, help="Whether to learn the threshold parameter")
 parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
 parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs")
-parser.add_argument("--learning_rate", type=float, default=5e-4, help="Learning rate")
+parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
 parser.add_argument("--save", action="store_true", help="Whether to save the model checkpoint")
 parser.add_argument("--eval", action="store_true", help="Whether to evaluate the model")
 parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "output_results" / "E_pos"), help="Output directory for checkpoint and metadata")
