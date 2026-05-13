@@ -158,7 +158,7 @@ train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
 class_weights = torch.zeros(num_labels)
 for i in range(num_labels):
     class_weights[i] = X_train.shape[0] / (num_labels * train_class_counts[i])
-loss_fn = nn.CrossEntropyLoss(weight=class_weights) # Use class weights to handle class imbalance in the training data
+loss_fn = nn.CrossEntropyLoss(weight=class_weights.to(device)) # Use class weights to handle class imbalance in the training data
 optimizer = torch.optim.Adam(net.parameters(), lr=args.learning_rate)
 
 total_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
