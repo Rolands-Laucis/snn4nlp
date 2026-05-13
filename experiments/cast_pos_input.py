@@ -15,6 +15,7 @@ parser = argparse.ArgumentParser(description='Train an SNN for UPOS tagging')
 parser.add_argument('--limit', type=int, default=None, help='Limit the number of sentences for testing (default: 100)')
 parser.add_argument('--min_sentence_length', type=int, default=5, help='Minimum sentence length (default: 5)')
 parser.add_argument('--max_sentence_length', type=int, default=None, help='Maximum sentence length (default: 40)')
+parser.add_argument('--train_test_split_ratio', type=float, default=0.9, help='Ratio of training to testing data (default: 0.9)')
 parser.add_argument('--embeddings_path', type=str, default=INPUT_DATA_DIR / 'word_embeddings' / 'glove' / 'glove_50d.pkl', help='Path to the embeddings file')
 parser.add_argument('--out_folder', type=str, default=INPUT_DATA_DIR / 'cast_pos', help='Path to save the cast embeddings')
 args = parser.parse_args()
@@ -39,9 +40,9 @@ UD_test, _ = ReadConlluFile(UD_DIR / 'en_ewt-ud-test.conllu', min_sentence_lengt
 UD_train += UD_dev + UD_test
 del UD_dev  # Remove dev set as it's now part of train
 random.shuffle(UD_train) # shuffle
-cut = int(0.8 * len(UD_train))
-UD_test = UD_train[cut:]  # 20% for testing
-UD_train = UD_train[:cut]  # 80% for training
+cut = int(args.train_test_split_ratio * len(UD_train))
+UD_test = UD_train[cut:]
+UD_train = UD_train[:cut]
 print(len(UD_train), len(UD_test))
 
 #load word embeddings
