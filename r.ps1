@@ -12,10 +12,8 @@
 # python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10 --embeddings_path "input_data\word_embeddings\glove\glove_25d_sigmoid.pkl"
 # python experiments/cast_sent_input.py --min_sentence_length 5 --max_sentence_length 10 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
 
-# python experiments/cast_pos_input.py --limit 5000 --min_sentence_length 5 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
-# the limit is applied to sentence count to reduce computation and file sizes, because later the experiment only constructs random 20k samples of these.
-# python experiments/cast_pos_input.py --limit 20000 --min_sentence_length 5 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
-# and seq2seq up to 20 token sentences gets almost 4k samples also.
+# python experiments/cast_pos_input.py --min_sentence_length 5 --max_sentence_length 20 --train_test_split_ratio 0.9 --embeddings_path "input_data\word_embeddings\glove\glove_100d_sigmoid.pkl"
+# min 5 because the window size is 5, so anything less than that would be weird to train on. Max 20 because the dataset has a max 157 and that is far too big of an input to the network.
 
 # python experiments/cast_ner_input.py
 
@@ -141,6 +139,10 @@ $alpha = 0.94 # best performance was with both equal, but that kinda reduces it 
 # python experiments/E_pos_eval.py --shuffle_context_window --input_mode "spatial" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-02_17-32-33_e-50_s-20_spatial.pt"
 # python experiments/E_pos_eval.py --input_mode "temporal" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-03_07-46-23_e-50_s-20_temporal.pt"
 # python experiments/E_pos_eval.py --shuffle_context_window --input_mode "temporal" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-03_07-46-23_e-50_s-20_temporal.pt"
+
+# UPOS ANN MLP
+# python experiments/E_pos_ann-mlp.py --save --eval --limit 1000 --learning_rate $lr --batch_size $batch_size --epochs 1
+# python experiments/E_pos_seq_ann-mlp.py --save --eval --limit 1000 --learning_rate $lr --batch_size $batch_size --epochs 1
 
 # UPOS seq2seq mode
 # python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq_tmp" --epochs 1 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64
