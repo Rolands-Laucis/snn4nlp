@@ -13,6 +13,9 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader, TensorDataset
 
+from E_pos_seq_model import SequencePOS_SNN as SharedSequencePOS_SNN
+from E_pos_seq_shared import build_seq_samples as shared_build_seq_samples
+from E_pos_seq_shared import evaluate_model as shared_evaluate_model
 from readers import ReadUPOSInputFile
 from snn_util import spike_encode, get_neuron_beta_values_by_layer, parse_threshold_layer_scalars
 from snn_diagnostics import collect_forward_diagnostics, plot_layer_spike_trains, plot_layer_membrane_traces
@@ -564,8 +567,8 @@ idx_to_label = {i: tag for tag, i in label_to_idx.items()}
 num_labels = len(label_to_idx)
 
 # Build sequence samples (pad to global sequence length). Apply limit after padding.
-X_train, y_train, train_mask = build_seq_samples(sent_train_data, embedding_dim, label_to_idx, seq_len=sequence_length)
-X_test, y_test, test_mask = build_seq_samples(sent_test_data, embedding_dim, label_to_idx, seq_len=sequence_length)
+X_train, y_train, train_mask = shared_build_seq_samples(sent_train_data, embedding_dim, label_to_idx, seq_len=sequence_length)
+X_test, y_test, test_mask = shared_build_seq_samples(sent_test_data, embedding_dim, label_to_idx, seq_len=sequence_length)
 
 if args.limit is not None:
     train_limit = min(args.limit, X_train.shape[0])
@@ -600,7 +603,7 @@ print(f"Test class distribution: {test_class_counts.tolist()}")
 
 # For seq2seq we run the SNN on a flattened sentence; input size is seq_len * embedding_dim
 input_size = sequence_length * embedding_dim
-net = SequencePOS_SNN(
+net = SharedSequencePOS_SNN(
     input_size,
     args.num_hidden_1,
     args.num_hidden_2,
@@ -873,7 +876,7 @@ if args.eval:
     args.cli_args = args
     args.checkpoint = checkpoint
     args.estimate_energy = False
-    results = evaluate_model(args)
+    results = shared_evaluate_model(args)
 
     training_metadata["results"]["test_loss"] = results["eval_loss"]
     training_metadata["results"]["test_accuracy"] = results["eval_accuracy"]

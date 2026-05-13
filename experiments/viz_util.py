@@ -15,7 +15,8 @@ colors = Namespace(**{
 })
 
 def ModelNameConvention(s:str):
-    s = s.replace('input_mode', 'poi-sc').replace('_', '-')
+    s = s.replace('input_mode', 'poi-sc').replace('upos', '').replace('spike_count', 'sc')
+    s = s.replace('_', '-').replace('/', '-')
     s = s.replace('spatial', 'spa').replace('temporal', 'tem')
     s = s.replace('poisson', 'poi').replace('latency', 'lat')
     s = s.replace('-ce', '').replace('ce', '')

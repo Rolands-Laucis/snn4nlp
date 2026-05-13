@@ -1,66 +1,57 @@
+from __future__ import annotations
+
+from argparse import Namespace
+from pathlib import Path
 from typing import Any
 import json
 import time
-import argparse
-from argparse import Namespace
-from pathlib import Path
 
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from E_pos_model import SequencePOS_SNN
+from E_pos_seq_model import SequencePOS_SNN
 from readers import ReadUPOSInputFile
-from snn_util import spike_encode, parse_threshold_layer_scalars
-from snn_diagnostics import collect_forward_diagnostics, plot_layer_spike_trains, plot_layer_membrane_traces
-import matplotlib.pyplot as plt
+from snn_diagnostics import collect_forward_diagnostics, plot_layer_membrane_traces, plot_layer_spike_trains
+from snn_util import parse_threshold_layer_scalars, spike_encode
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAST_INPUT_DIR = PROJECT_ROOT / "input_data" / "cast_pos"
 
 
-def build_pos_samples(
+def build_seq_samples(
     sentences: list[list[list[Any]]],
     embedding_dim: int,
     label_to_idx: dict[str, int],
-    window_size: int = 5,
-    shuffle_window: bool = False,  # Special test condition: shuffle context window word order
-) -> tuple[torch.Tensor, torch.Tensor]:
-    if window_size < 1 or window_size % 2 == 0:
-        raise ValueError("window_size must be an odd integer >= 1")
-
-    pad = window_size // 2
-    unk_vec = [0.0] * embedding_dim
-
+    seq_len: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     samples = []
     labels = []
+    masks = []
 
     for sentence in sentences:
-        sent_len = len(sentence)
-        for i in range(sent_len):
-            window = []
-            for j in range(i - pad, i + pad + 1): #for the current word at position i, we want to include pad words before and after, so the window is from i-pad to i+pad inclusive
-                if j < 0 or j >= sent_len: #if those positions are out of bounds (sentence overhangs), we add a padding vector (unk_vec)
-                    window.append(unk_vec)
-                else:
-                    word_info = sentence[j]
-                    window.append(word_info[3:]) # Assuming embedding vector starts at index 3
+        seq = []
+        lab = []
+        m = []
+        for token in sentence:
+            seq.append(token[3:])
+            lab.append(label_to_idx.get(token[1], 0))
+            m.append(True)
 
-            # Special test condition: shuffle the context window word order after construction
-            if shuffle_window:
-                import random
-                random.shuffle(window)
+        while len(seq) < seq_len:
+            seq.append([0.0] * embedding_dim)
+            lab.append(0)
+            m.append(False)
 
-            target_tag = sentence[i][1] if len(sentence[i]) > 1 else None #UPOS tag of the i-th word_info
-            if target_tag is None or target_tag not in label_to_idx:
-                continue
-
-            samples.append(window)
-            labels.append(label_to_idx[target_tag])
+        samples.append(seq)
+        labels.append(lab)
+        masks.append(m)
 
     X = torch.tensor(samples, dtype=torch.float32)
     y = torch.tensor(labels, dtype=torch.long)
-    return X, y
+    mask = torch.tensor(masks, dtype=torch.bool)
+    return X, y, mask
 
 
 def decode_predictions(spike_counts: torch.Tensor) -> tuple[torch.Tensor, int]:
@@ -73,14 +64,6 @@ def compute_classification_loss(loss_fn, y_true: torch.Tensor, spike_counts: tor
 
 
 def estimate_batch_ac_operations(model, spike_seq):
-    """
-    Estimate AC operations for one batch using the model's feedforward path.
-
-    Assumes the model has fc1/lif1/fc2/lif2/fc3/lif3 and spike_seq is [T, B, input_size].
-    AC operations are estimated by counting per-sample incoming spikes to each layer
-    and multiplying by the number of synapses (output features), assuming fully
-    connected layers.
-    """
     if spike_seq.ndim != 3:
         raise ValueError(f"spike_seq must be rank-3 [T, B, input_size], got {tuple(spike_seq.shape)}")
 
@@ -150,6 +133,7 @@ def evaluate_batches(
     model,
     features,
     labels,
+    masks,
     batch_size,
     device,
     n_steps,
@@ -159,25 +143,26 @@ def evaluate_batches(
     estimate_energy=False,
     eac_pj=25.63,
 ):
-    eval_ds = TensorDataset(features, labels)
+    eval_ds = TensorDataset(features, labels, masks)
     eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False)
 
     running_loss = 0.0
-    running_correct = 0
-    running_total = 0
+    running_correct_tokens = 0
+    running_total_tokens = 0
     running_ac_ops = 0.0
     running_energy_pj = 0.0
 
-    # print(f"Evaluating on {len(eval_ds)} samples with batch_size={batch_size} and n_steps={n_steps}...")
-
     with torch.no_grad():
-        for xb, yb in eval_loader:
+        for xb, yb, mb in eval_loader:
             xb = xb.to(device)
             yb = yb.to(device)
+            mb = mb.to(device)
 
+            batch_size_eff, seq_len_eff, _ = xb.shape
+            xb_flat = xb.reshape(batch_size_eff, -1)
             spike_seq = spike_encode(
-                xb,
-                n_steps=n_steps,
+                xb_flat.unsqueeze(1),
+                n_steps,
                 input_mode=input_mode,
                 encoding_method=encoding_method,
             ).to(device)
@@ -187,18 +172,25 @@ def evaluate_batches(
                 running_ac_ops += float(batch_ac_ops.sum().item())
                 running_energy_pj += float(batch_energy_pj.sum().item())
 
-            spike_counts = model(spike_seq)
-            loss = compute_classification_loss(loss_fn, yb, spike_counts=spike_counts)
+            per_step_spikes = model(spike_seq)
+            spike_sum = per_step_spikes.sum(dim=0)
+            emissions = spike_sum.view(batch_size_eff, seq_len_eff, -1)
 
-            running_loss += loss.item() * xb.size(0)
-            preds, _ = decode_predictions(spike_counts)
-            running_correct += (preds == yb).sum().item()
-            running_total += xb.size(0)
+            valid_emissions = emissions[mb]
+            valid_labels = yb[mb]
+            if valid_labels.numel() == 0:
+                continue
 
-    avg_loss = running_loss / max(1, running_total)
-    avg_acc = running_correct / max(1, running_total)
-    avg_ac_ops = running_ac_ops / max(1, running_total) if estimate_energy else None
-    avg_energy_pj = running_energy_pj / max(1, running_total) if estimate_energy else None
+            loss = loss_fn(valid_emissions, valid_labels)
+            running_loss += loss.item() * int(valid_labels.numel())
+            preds = emissions.argmax(dim=-1)
+            running_correct_tokens += int(((preds == yb) & mb).sum().item())
+            running_total_tokens += int(valid_labels.numel())
+
+    avg_loss = running_loss / max(1, running_total_tokens)
+    avg_acc = running_correct_tokens / max(1, running_total_tokens)
+    avg_ac_ops = running_ac_ops / max(1, running_total_tokens) if estimate_energy else None
+    avg_energy_pj = running_energy_pj / max(1, running_total_tokens) if estimate_energy else None
     return avg_loss, avg_acc, avg_ac_ops, avg_energy_pj
 
 
@@ -226,17 +218,8 @@ def load_model_from_checkpoint(model_path, device):
     model.eval()
     return model, checkpoint
 
+
 def evaluate_model(args: Namespace) -> dict:
-    if isinstance(args, dict):
-        args = Namespace(**args)
-
-    if getattr(args, "limit", None) is not None:
-        args.limit = int(args.limit)
-    if getattr(args, "batch_size", None) is not None:
-        args.batch_size = int(args.batch_size)
-    if getattr(args, "sim_steps", None) is not None:
-        args.sim_steps = int(args.sim_steps)
-
     if args.limit is not None and args.limit <= 0:
         raise ValueError("--limit must be a positive integer when provided")
 
@@ -246,66 +229,107 @@ def evaluate_model(args: Namespace) -> dict:
     model_path = getattr(args, "model_path", None)
     x_data = getattr(args, "x_data", None)
     y_data = getattr(args, "y_data", None)
+    masks = getattr(args, "masks", None)
+    model_config = getattr(args, "model_config", {}) or {}
+    cli_args = getattr(args, "cli_args", {}) or {}
+    checkpoint = getattr(args, "checkpoint", {}) or {}
     limit = getattr(args, "limit", None)
+
+    if isinstance(model_config, Namespace):
+        model_config = vars(model_config)
+    if isinstance(cli_args, Namespace):
+        cli_args = vars(cli_args)
 
     if model is None:
         if model_path is None:
             raise ValueError("Either args.model or args.model_path must be provided")
-        model, _ = load_model_from_checkpoint(model_path, device)
+        model_path = Path(model_path)
+        if not model_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {model_path}")
+        model, checkpoint = load_model_from_checkpoint(model_path, device)
+        model_config = checkpoint.get("model_config", {})
+        cli_args = checkpoint.get("cli_args", {})
+    else:
+        model = model.to(device)
+        model.eval()
+        if not model_config and hasattr(model, "fc1") and hasattr(model.fc1, "in_features"):
+            model_config = {
+                "input_size": int(model.fc1.in_features),
+                "hidden_size_1": int(model.fc1.out_features),
+                "hidden_size_2": int(model.fc2.out_features),
+                "output_size": int(model.fc3.out_features),
+            }
 
-    model = model.to(device)
-    model.eval()
+    input_mode = (getattr(args, "input_mode", None) or model_config.get("input_mode") or cli_args.get("input_mode") or "spatial").lower()
+    encoding_method = (getattr(args, "encoding_method", None) or model_config.get("encoding_method") or cli_args.get("encoding_method") or "poisson").lower()
+    batch_size = getattr(args, "batch_size", None)
+    if batch_size is None:
+        batch_size = int(model_config.get("batch_size", cli_args.get("batch_size", 32)))
+    else:
+        try:
+            batch_size = int(batch_size)
+        except Exception:
+            batch_size = int(float(batch_size))
 
-    input_mode = getattr(args, "input_mode", "spatial").lower()
-    encoding_method = getattr(args, "encoding_method", "poisson").lower()
-    batch_size = getattr(args, "batch_size", 32)
-    sim_steps = getattr(args, "sim_steps", 20)
+    sim_steps = getattr(args, "sim_steps", None)
+    if sim_steps is None:
+        sim_steps = int(model_config.get("sim_steps", cli_args.get("sim_steps", 20)))
+    else:
+        try:
+            sim_steps = int(sim_steps)
+        except Exception:
+            sim_steps = int(float(sim_steps))
     estimate_energy = getattr(args, "estimate_energy", False)
     eac_pj = getattr(args, "energy_ac_cost_pj", 25.63)
 
-    print(f"Evaluating model", model_path, 'Limit:', limit)
+    print(f"Evaluating model {model_path} Limit: {limit}")
 
-    # If x/y data are not provided, load the cast POS input file and build samples
     if x_data is None or y_data is None:
-        input_file_prefix = getattr(args, "input_file_prefix", "pos_d100")
-        split = getattr(args, "split", "test")
-
+        input_file_prefix = getattr(args, "input_file_prefix", None) or model_config.get("input_file_prefix") or cli_args.get("input_file_prefix") or "pos_d100"
+        split = getattr(args, "split", None) or cli_args.get("split", "test")
         split_file = CAST_INPUT_DIR / f"{input_file_prefix}_{split}.pkl"
         if not split_file.exists():
             raise FileNotFoundError(f"POS input file not found: {split_file}")
 
         sentences, embedding_dim = ReadUPOSInputFile(split_file, limit=limit)
+        label_maps = checkpoint.get("label_maps", {}) if isinstance(checkpoint, dict) else {}
+        label_to_idx = label_maps.get("label_to_idx") if isinstance(label_maps, dict) else None
+        if not label_to_idx:
+            tags = set()
+            for sent in sentences:
+                for token in sent:
+                    if len(token) > 1:
+                        tags.add(token[1])
+            label_to_idx = {tag: i for i, tag in enumerate(sorted(tags))}
 
-        # build label mapping from data
-        tags = set()
-        for sent in sentences:
-            for token in sent:
-                if len(token) > 1:
-                    tags.add(token[1])
-        label_to_idx = {tag: i for i, tag in enumerate(sorted(tags))}
+        seq_len = int(model_config.get("sequence_length") or max((len(sentence) for sentence in sentences), default=0))
+        if seq_len <= 0:
+            raise ValueError("Unable to derive sequence length for evaluation")
 
-        window_size = getattr(args, "window_size", 5)
-        shuffle_window = getattr(args, "shuffle_context_window", False)
-        x_data, y_data = build_pos_samples(sentences, embedding_dim, label_to_idx, window_size=window_size, shuffle_window=shuffle_window)
+        x_data, y_data, masks = build_seq_samples(sentences, embedding_dim, label_to_idx, seq_len=seq_len)
 
     loss_fn = nn.CrossEntropyLoss()
 
-    # Optional diagnostics: plot spike rasters and output-layer membrane for first sample
     if getattr(args, "diagnose", False):
         first_x = x_data[:1]
-        spike_seq = spike_encode(first_x, sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
+        first_x_flat = first_x.reshape(first_x.shape[0], -1)
+        spike_seq = spike_encode(first_x_flat.unsqueeze(1), sim_steps, input_mode=input_mode, encoding_method=encoding_method).to(device)
         diagnostics = collect_forward_diagnostics(model, spike_seq)
-        spike_fig, _ = plot_layer_spike_trains(diagnostics, sample_index=0, input_spikes=spike_seq)
+        plot_layer_spike_trains(diagnostics, sample_index=0, input_spikes=spike_seq)
         output_layer_name = list(diagnostics.keys())[-1]
-        mem_fig, _ = plot_layer_membrane_traces(diagnostics, layer_name=output_layer_name, sample_index=0)
+        plot_layer_membrane_traces(diagnostics, layer_name=output_layer_name, sample_index=0)
         plt.show()
-        return
+        return {}
+
+    if masks is None:
+        masks = torch.ones_like(y_data, dtype=torch.bool)
 
     eval_start = time.perf_counter()
     test_loss, test_acc, test_avg_ac_ops, test_avg_energy_pj = evaluate_batches(
         model=model,
         features=x_data,
         labels=y_data,
+        masks=masks,
         batch_size=batch_size,
         device=device,
         n_steps=sim_steps,
@@ -340,47 +364,12 @@ def evaluate_model(args: Namespace) -> dict:
         print(f"Average AC operations per sample: {results['avg_ac_operations_per_sample']:.2f}")
         print(f"Average energy per sample: {results['avg_energy_pj_per_sample']:.2f} pJ")
 
-    if getattr(args, "output_json", False):
-        output_json = Path(args.output_json)
+    output_json = getattr(args, "output_json", None)
+    if output_json:
+        output_json = Path(output_json)
         output_json.parent.mkdir(parents=True, exist_ok=True)
         with open(output_json, "w", encoding="utf-8") as handle:
             json.dump(results, handle, indent=2)
         print(f"Saved evaluation results to {output_json}")
 
     return results
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Evaluate a saved SNN POS model checkpoint")
-    parser.add_argument("--model_path", type=str, required=True, help="Path to a saved .pt checkpoint")
-    parser.add_argument("--input_file_prefix", type=str, default="pos_d100", help="Prefix for cast POS input files")
-    parser.add_argument("--split", type=str, default="test", choices=["train", "test"], help="Dataset split to evaluate")
-    parser.add_argument("--limit", type=int, default=None, help="Optional sample limit for quick evaluations")
-    parser.add_argument("--batch_size", type=int, default=None, help="Batch size override (defaults to checkpoint cli arg)")
-    parser.add_argument("--sim_steps", type=int, default=None, help="Simulation steps override (defaults to checkpoint model config)")
-    parser.add_argument("--input_mode", type=str, default="spatial", choices=["spatial", "temporal"], help="Input mode override")
-    parser.add_argument("--encoding_method", type=str, default="latency", choices=["poisson", "latency"], help="Encoding method override")
-    parser.add_argument("--estimate_energy", action="store_true", help="Estimate average AC operations and energy per tested sample")
-    parser.add_argument("--energy_ac_cost_pj", type=float, default=25.63, help="Energy cost of one AC operation in pJ (hardware-dependent)")
-    parser.add_argument("--diagnose", action="store_true", help="Show spike trains and output-layer membrane trace for first sample")
-    parser.add_argument("--output_json", type=str, default=None, help="Optional path to save evaluation results as JSON")
-    parser.add_argument("--window_size", type=int, default=5, help="Context window size for POS samples (odd integer)")
-    parser.add_argument("--shuffle_context_window", action="store_true", help="Special test condition: shuffle the context window word order after constructing it")
-
-    args = parser.parse_args()
-
-    # load model from checkpoint
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, checkpoint = load_model_from_checkpoint(args.model_path, device)
-
-    # If not provided, place it next to the model checkpoint with a related name.
-    if not args.output_json:
-        args.output_json = Path(args.model_path).parent / f"eval_{Path(args.model_path).stem}.json"
-
-    # provide model to evaluate_model; other data will be loaded inside evaluate_model
-    args.model = model
-    evaluate_model(args)
-
-
-if __name__ == "__main__":
-    main()
