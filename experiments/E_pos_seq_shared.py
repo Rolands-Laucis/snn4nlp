@@ -68,8 +68,8 @@ def estimate_batch_ac_operations(model, x_emb):
     if x_emb.ndim != 3:
         raise ValueError(f"x_emb must be rank-3 [batch, seq_len, emb_dim], got {tuple(x_emb.shape)}")
 
-    if not all(hasattr(model, name) for name in ("fc1", "fc2", "fc3", "lif1", "lif2", "lif3")):
-        raise ValueError("Energy estimation expects fc1/lif1/fc2/lif2/fc3/lif3 model structure")
+    if not all(hasattr(model, name) for name in ("fc1", "fc2", "lif1", "lif2", "linear_out")):
+        raise ValueError("Energy estimation expects fc1/lif1/fc2/lif2/linear_out model structure")
 
     batch_size, seq_len, emb_dim = x_emb.shape
     device = x_emb.device
@@ -79,7 +79,6 @@ def estimate_batch_ac_operations(model, x_emb):
     # Initialize SNN state
     syn1, mem1 = model.lif1.init_synaptic()
     syn2, mem2 = model.lif2.init_synaptic()
-    syn3, mem3 = model.lif3.init_synaptic()
 
     with torch.no_grad():
         # Process each token sequentially
@@ -92,11 +91,7 @@ def estimate_batch_ac_operations(model, x_emb):
 
             cur2 = model.fc2(spk1)
             spk2, syn2, mem2 = model.lif2(cur2, syn2, mem2)
-            running_ac_ops += spk2.sum(dim=1).to(dtype) * float(model.fc3.out_features)
-
-            cur3 = model.fc3(spk2)
-            spk3, syn3, mem3 = model.lif3(cur3, syn3, mem3)
-            running_ac_ops += spk3.sum(dim=1).to(dtype) * float(model.linear_out.out_features)
+            running_ac_ops += spk2.sum(dim=1).to(dtype) * float(model.linear_out.out_features)
 
     return running_ac_ops
 
@@ -252,32 +247,28 @@ def evaluate_model(args: Namespace) -> dict:
 
     estimate_energy = getattr(args, "estimate_energy", False)
     eac_pj = getattr(args, "energy_ac_cost_pj", 25.63)
+    input_file_prefix = getattr(args, "input_file_prefix", None) or model_config.get("input_file_prefix") or cli_args.get("input_file_prefix") or "pos_d100"
+    split = getattr(args, "split", None) or cli_args.get("split", "test")
+    split_file = CAST_INPUT_DIR / f"{input_file_prefix}_{split}.pkl"
+    if not split_file.exists():
+        raise FileNotFoundError(f"POS input file not found: {split_file}")
 
-    print(f"Evaluating model {model_path} Limit: {limit}")
+    sentences, embedding_dim = ReadUPOSInputFile(split_file, limit=limit)
+    label_maps = checkpoint.get("label_maps", {}) if isinstance(checkpoint, dict) else {}
+    label_to_idx = label_maps.get("label_to_idx") if isinstance(label_maps, dict) else None
+    if not label_to_idx:
+        tags = set()
+        for sent in sentences:
+            for token in sent:
+                if len(token) > 1:
+                    tags.add(token[1])
+        label_to_idx = {tag: i for i, tag in enumerate(sorted(tags))}
 
-    if x_data is None or y_data is None:
-        input_file_prefix = getattr(args, "input_file_prefix", None) or model_config.get("input_file_prefix") or cli_args.get("input_file_prefix") or "pos_d100"
-        split = getattr(args, "split", None) or cli_args.get("split", "test")
-        split_file = CAST_INPUT_DIR / f"{input_file_prefix}_{split}.pkl"
-        if not split_file.exists():
-            raise FileNotFoundError(f"POS input file not found: {split_file}")
+    seq_len = int(model_config.get("sequence_length") or max((len(sentence) for sentence in sentences), default=0))
+    if seq_len <= 0:
+        raise ValueError("Unable to derive sequence length for evaluation")
 
-        sentences, embedding_dim = ReadUPOSInputFile(split_file, limit=limit)
-        label_maps = checkpoint.get("label_maps", {}) if isinstance(checkpoint, dict) else {}
-        label_to_idx = label_maps.get("label_to_idx") if isinstance(label_maps, dict) else None
-        if not label_to_idx:
-            tags = set()
-            for sent in sentences:
-                for token in sent:
-                    if len(token) > 1:
-                        tags.add(token[1])
-            label_to_idx = {tag: i for i, tag in enumerate(sorted(tags))}
-
-        seq_len = int(model_config.get("sequence_length") or max((len(sentence) for sentence in sentences), default=0))
-        if seq_len <= 0:
-            raise ValueError("Unable to derive sequence length for evaluation")
-
-        x_data, y_data, masks = build_seq_samples(sentences, embedding_dim, label_to_idx, seq_len=seq_len)
+    x_data, y_data, masks = build_seq_samples(sentences, embedding_dim, label_to_idx, seq_len=seq_len)
 
     if getattr(args, "diagnose", False):
         token_spike_trains = []

@@ -15,6 +15,7 @@ from E_pos_seq_model import SequencePOS_SNN
 from E_pos_seq_shared import build_seq_samples as shared_build_seq_samples
 from E_pos_seq_shared import evaluate_model as shared_evaluate_model
 from readers import ReadUPOSInputFile
+from snn_util import parse_threshold_layer_scalars, spike_encode
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAST_INPUT_DIR = PROJECT_ROOT / "input_data" / "cast_pos"
@@ -74,7 +75,7 @@ def estimate_batch_ac_operations(model, spike_seq):
     """
     Estimate AC operations for one batch using the model's feedforward path.
 
-    Assumes the model has fc1/lif1/fc2/lif2/fc3/lif3 and spike_seq is [T, B, input_size].
+    Assumes the model has fc1/lif1/fc2/lif2/linear_out and spike_seq is [T, B, input_size].
     AC operations are estimated by counting per-sample incoming spikes to each layer
     and multiplying by the number of synapses (output features), assuming fully
     connected layers.
@@ -82,8 +83,8 @@ def estimate_batch_ac_operations(model, spike_seq):
     if spike_seq.ndim != 3:
         raise ValueError(f"spike_seq must be rank-3 [T, B, input_size], got {tuple(spike_seq.shape)}")
 
-    if not all(hasattr(model, name) for name in ("fc1", "fc2", "fc3", "lif1", "lif2", "lif3")):
-        raise ValueError("Energy estimation expects fc1/lif1/fc2/lif2/fc3/lif3 model structure")
+    if not all(hasattr(model, name) for name in ("fc1", "fc2", "lif1", "lif2", "linear_out")):
+        raise ValueError("Energy estimation expects fc1/lif1/fc2/lif2/linear_out model structure")
 
     batch_size = spike_seq.shape[1]
     device = spike_seq.device
@@ -92,21 +93,16 @@ def estimate_batch_ac_operations(model, spike_seq):
 
     neuron_class1 = model.lif1.__class__.__name__
     neuron_class2 = model.lif2.__class__.__name__
-    neuron_class3 = model.lif3.__class__.__name__
 
     mem1 = torch.zeros(batch_size, model.fc1.out_features, device=device, dtype=spike_seq.dtype)
     mem2 = torch.zeros(batch_size, model.fc2.out_features, device=device, dtype=spike_seq.dtype)
-    mem3 = torch.zeros(batch_size, model.fc3.out_features, device=device, dtype=spike_seq.dtype)
 
     syn1 = None
     syn2 = None
-    syn3 = None
     if neuron_class1 in ("Synaptic", "QLIF"):
         syn1 = torch.zeros(batch_size, model.fc1.out_features, device=device, dtype=spike_seq.dtype)
     if neuron_class2 in ("Synaptic", "QLIF"):
         syn2 = torch.zeros(batch_size, model.fc2.out_features, device=device, dtype=spike_seq.dtype)
-    if neuron_class3 in ("Synaptic", "QLIF"):
-        syn3 = torch.zeros(batch_size, model.fc3.out_features, device=device, dtype=spike_seq.dtype)
 
     with torch.no_grad():
         for step in range(spike_seq.shape[0]):
@@ -127,13 +123,7 @@ def estimate_batch_ac_operations(model, spike_seq):
             else:
                 spk2, mem2 = model.lif2(cur2, mem2)
 
-            running_ac_ops += spk2.sum(dim=1).to(dtype) * float(model.fc3.out_features)
-
-            cur3 = model.fc3(spk2)
-            if neuron_class3 in ("Synaptic", "QLIF"):
-                spk3, syn3, mem3 = model.lif3(cur3, syn3, mem3)
-            else:
-                spk3, mem3 = model.lif3(cur3, mem3)
+            running_ac_ops += spk2.sum(dim=1).to(dtype) * float(model.linear_out.out_features)
 
     return running_ac_ops
 
@@ -221,13 +211,16 @@ def load_model_from_checkpoint(model_path, device):
 
     threshold_layer_scalars = parse_threshold_layer_scalars(cli_args.get("threshold_layer_scalars"))
     model = SequencePOS_SNN(
-        input_size=int(model_config["input_size"]),
+        emb_dim=int(model_config.get("embedding_dim", model_config.get("input_size", cli_args.get("embedding_dim", 100)))),
         hidden_size_1=int(model_config["hidden_size_1"]),
         hidden_size_2=int(model_config["hidden_size_2"]),
-        output_size=int(model_config["output_size"]),
+        num_tags=int(model_config.get("num_labels", model_config.get("output_size", cli_args.get("num_labels", 0)))),
+        n_steps=int(model_config.get("n_steps", cli_args.get("sim_steps", 20))),
+        input_mode=model_config.get("input_mode", cli_args.get("input_mode", "spatial")),
+        encoding_method=model_config.get("encoding_method", cli_args.get("encoding_method", "poisson")),
         beta=model_config.get("beta", cli_args.get("beta")),
         alpha=model_config.get("alpha", cli_args.get("alpha")),
-        threshold=cli_args.get("threshold"),
+        threshold=model_config.get("threshold", cli_args.get("threshold")),
         threshold_layer_scalars=threshold_layer_scalars,
     )
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -417,6 +410,17 @@ def save_training_metadata(metadata_path, metadata):
         json.dump(metadata, handle, indent=2)
 
 
+def print_model_architecture_summary(model: SequencePOS_SNN, embedding_dim: int, num_tags: int) -> None:
+    print("  Model architecture:")
+    print(f"    Input: (batch, seq_len, emb_dim={embedding_dim})")
+    print(f"    fc1: Linear({embedding_dim} -> {model.fc1.out_features})")
+    print(f"    lif1: Synaptic({model.fc1.out_features})")
+    print(f"    fc2: Linear({model.fc1.out_features} -> {model.fc2.out_features})")
+    print(f"    lif2: Synaptic({model.fc2.out_features})")
+    print(f"    linear_out: Linear({model.fc2.out_features} -> {num_tags})")
+    print("    crf: CRF()")
+
+
 sent_train_data, embedding_dim = ReadUPOSInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_train.pkl", limit=None)
 sent_test_data, _ = ReadUPOSInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_test.pkl", limit=None)
 
@@ -475,6 +479,8 @@ print(f"Class count (test): {len(test_class_counts.tolist())}")
 print(f"POS tags: {pos_tags}")
 print(f"Train class distribution: {train_class_counts.tolist()}")
 print(f"Test class distribution: {test_class_counts.tolist()}")
+print(f"First train sample labels: {y_train[0]}")  # print first sample labels for sanity check
+# exit(0)
 
 # Create SNN+CRF model: processes token embeddings sequentially
 net = SequencePOS_SNN(
@@ -575,8 +581,6 @@ print(f"  Per-neuron params: {args.per_neuron_params}")
 print(f"  Sequence length: {sequence_length}")
 print(f"  Embedding dim: {embedding_dim}")
 print(f"  Input size: {embedding_dim}")
-print(f"  Hidden size 1: {args.num_hidden_1}")
-print(f"  Hidden size 2: {args.num_hidden_2}")
 print(f"  Output classes: {num_labels}")
 print(f"  Num steps: {args.sim_steps}")
 print(f"  Batch size: {args.batch_size}")
@@ -586,11 +590,12 @@ print(f"  Total learnable parameters: {total_params}")
 print(f'  LOSS: CRF loss computed internally by the model')
 print(f"  Save: {args.save}")
 print(f"  Eval: {args.eval}")
+print_model_architecture_summary(net, embedding_dim, num_labels)
 
 # Train
 epoch_losses = []
 epoch_accuracies = []
-progress_print_every_samples = 10_000
+progress_print_every_samples = 1_000
 net.train()
 training_start_time = time.perf_counter()
 

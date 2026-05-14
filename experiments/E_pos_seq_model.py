@@ -14,8 +14,7 @@ class SequencePOS_SNN(nn.Module):
       Process each token sequentially with state persistence:
         → fc1/lif1: 256 neurons
         → fc2/lif2: 128 neurons
-        → fc3/lif3: 128 neurons (last spiking layer, state carries forward)
-        → linear_out: nn.Linear(128, num_tags) — raw real-valued emissions per token
+                → linear_out: nn.Linear(128, num_tags) — raw real-valued emissions per token
       → CRF: log-likelihood loss or Viterbi decoding
     
     State (syn, mem) persists across token positions, giving each token context
@@ -52,7 +51,6 @@ class SequencePOS_SNN(nn.Module):
 
         self.fc1 = nn.Linear(emb_dim, hidden_size_1)
         self.fc2 = nn.Linear(hidden_size_1, hidden_size_2)
-        self.fc3 = nn.Linear(hidden_size_2, hidden_size_2)
         
         # Plain linear layer for emissions (no spiking)
         self.linear_out = nn.Linear(hidden_size_2, num_tags)
@@ -77,12 +75,9 @@ class SequencePOS_SNN(nn.Module):
         beta_1 = make_param(beta, hidden_size_1)
         alpha_2 = make_param(alpha, hidden_size_2)
         beta_2 = make_param(beta, hidden_size_2)
-        alpha_3 = make_param(alpha, hidden_size_2)
-        beta_3 = make_param(beta, hidden_size_2)
 
         thr1 = torch.rand(hidden_size_1) if threshold is None else float(threshold) * threshold_layer_scalars[0]
         thr2 = torch.rand(hidden_size_2) if threshold is None else float(threshold) * threshold_layer_scalars[1]
-        thr3 = torch.rand(hidden_size_2) if threshold is None else float(threshold) * threshold_layer_scalars[2]
 
         self.lif1 = snn.Synaptic(
             alpha=alpha_1,
@@ -97,15 +92,6 @@ class SequencePOS_SNN(nn.Module):
             alpha=alpha_2,
             beta=beta_2,
             threshold=thr2,
-            learn_alpha=learn_alpha,
-            learn_beta=learn_beta,
-            learn_threshold=learn_threshold,
-            reset_mechanism="zero",
-        )
-        self.lif3 = snn.Synaptic(
-            alpha=alpha_3,
-            beta=beta_3,
-            threshold=thr3,
             learn_alpha=learn_alpha,
             learn_beta=learn_beta,
             learn_threshold=learn_threshold,
@@ -135,7 +121,6 @@ class SequencePOS_SNN(nn.Module):
         # Initialize SNN state (no reset between tokens—state carries forward)
         syn1, mem1 = self.lif1.init_synaptic()
         syn2, mem2 = self.lif2.init_synaptic()
-        syn3, mem3 = self.lif3.init_synaptic()
         
         # Process each token sequentially, collecting emissions
         emissions_list = []
@@ -161,11 +146,8 @@ class SequencePOS_SNN(nn.Module):
                 cur2 = self.fc2(spk1)
                 spk2, syn2, mem2 = self.lif2(cur2, syn2, mem2)
 
-                cur3 = self.fc3(spk2)
-                spk3, syn3, mem3 = self.lif3(cur3, syn3, mem3)
-
                 # Project to real-valued emissions and accumulate across the spike train.
-                token_emissions.append(self.linear_out(spk3))
+                token_emissions.append(self.linear_out(spk2))
 
             emissions_t = torch.stack(token_emissions, dim=0).mean(dim=0)
             emissions_list.append(emissions_t)
