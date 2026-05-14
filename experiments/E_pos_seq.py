@@ -421,6 +421,30 @@ def print_model_architecture_summary(model: SequencePOS_SNN, embedding_dim: int,
     print("    crf: CRF()")
 
 
+@torch.no_grad()
+def evaluate_epoch_accuracy(model: SequencePOS_SNN, data_loader: DataLoader, device: torch.device) -> float:
+    model.eval()
+    running_correct_tokens = 0
+    running_total_tokens = 0
+
+    for xb, yb, mb in data_loader:
+        xb = xb.to(device)
+        yb = yb.to(device)
+        mb = mb.to(device)
+
+        preds = model(xb, mask=mb)
+
+        preds_tensor = torch.zeros_like(yb)
+        for i, pred_seq in enumerate(preds):
+            pred_len = min(len(pred_seq), yb.shape[1])
+            preds_tensor[i, :pred_len] = torch.tensor(pred_seq[:pred_len], device=device, dtype=torch.long)
+
+        running_correct_tokens += int(((preds_tensor == yb) & mb).sum().item())
+        running_total_tokens += int(mb.sum().item())
+
+    return running_correct_tokens / max(1, running_total_tokens)
+
+
 sent_train_data, embedding_dim = ReadUPOSInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_train.pkl", limit=None)
 sent_test_data, _ = ReadUPOSInputFile(CAST_INPUT_DIR / f"{args.input_file_prefix}_test.pkl", limit=None)
 
@@ -602,12 +626,12 @@ training_start_time = time.perf_counter()
 for epoch in range(args.epochs):
     epoch_start_time = time.perf_counter()
     running_loss = 0.0
-    running_correct_tokens = 0
     running_total_tokens = 0
     next_progress_print_at = progress_print_every_samples
-    epoch_total_samples = len(train_loader.dataset)
+    epoch_total_tokens = int(train_mask.sum().item())
     diagnostics_ran = False
 
+    net.train()
     for xb, yb, mb in train_loader:
         xb = xb.to(device)  # (batch, seq_len, emb_dim)
         yb = yb.to(device)  # (batch, seq_len)
@@ -617,18 +641,8 @@ for epoch in range(args.epochs):
         
         # Forward pass: CRF loss is computed internally
         loss = net(xb, tags=yb, mask=mb)
-        
-        # Get predictions via CRF Viterbi decoding
-        preds = net(xb, mask=mb)  # list[list[int]]
-        
-        # Convert predictions to tensor for accuracy
-        preds_tensor = torch.zeros_like(yb)
-        for i, pred_seq in enumerate(preds):
-            pred_len = min(len(pred_seq), sequence_length)
-            preds_tensor[i, :pred_len] = torch.tensor(pred_seq[:pred_len], device=device, dtype=torch.long)
 
-        # Compute accuracy on real tokens only
-        running_correct_tokens += int(((preds_tensor == yb) & mb).sum().item())
+        # Track token progress only during training.
         running_total_tokens += int(mb.sum().item())
         running_loss += (-loss).item() * batch_size_eff
 
@@ -637,19 +651,19 @@ for epoch in range(args.epochs):
         optimizer.step()
 
         # progress by tokens
-        running_total = min(epoch_total_samples, running_total_tokens)
+        running_total = min(epoch_total_tokens, running_total_tokens)
         while running_total >= next_progress_print_at:
-            progress_pct = (running_total / max(1, epoch_total_samples)) * 100.0
+            progress_pct = (running_total / max(1, epoch_total_tokens)) * 100.0
             epoch_elapsed_s = time.perf_counter() - epoch_start_time
             print(
                 f"Epoch {epoch + 1}/{args.epochs} progress | "
-                f"tokens: {running_total}/{epoch_total_samples} ({progress_pct:.2f}%) | "
+                f"tokens: {running_total}/{epoch_total_tokens} ({progress_pct:.2f}%) | "
                 f"elapsed_s: {epoch_elapsed_s:.2f}"
             )
             next_progress_print_at += progress_print_every_samples
 
     epoch_loss = running_loss / max(1, running_total_tokens)
-    epoch_acc = running_correct_tokens / max(1, running_total_tokens)
+    epoch_acc = evaluate_epoch_accuracy(net, train_loader, device)
     epoch_losses.append(float(epoch_loss))
     epoch_accuracies.append(float(epoch_acc))
 

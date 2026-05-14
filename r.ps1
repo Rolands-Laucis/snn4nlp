@@ -144,7 +144,7 @@ $alpha = 0.95
 # python experiments/E_pos_eval.py --shuffle_context_window --input_mode "temporal" --encoding_method "latency" --sim_steps $sim_steps --batch_size $batch_size --model_path "output_results\E_pos\main\upos_2026-05-03_07-46-23_e-50_s-20_temporal.pt"
 
 # UPOS seq2seq mode
-python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq_tmp" --epochs 1 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64
+python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq_tmp" --epochs 2 --beta $beta --alpha $alpha --sim_steps $sim_steps --limit 1000 --learning_rate $lr --batch_size 64
 # python experiments/E_pos_seq.py --save --eval --input_mode "spatial" --encoding_method "latency" --output_file_prefix "seq" --epochs $epochs --beta $beta --alpha $alpha --sim_steps $sim_steps --limit $limit --learning_rate $lr --batch_size $batch_size
 
 # UPOS ANN MLP
