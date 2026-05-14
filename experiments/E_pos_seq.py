@@ -623,12 +623,13 @@ progress_print_every_samples = 1_000
 net.train()
 training_start_time = time.perf_counter()
 
+print("\nStarting training...")
 for epoch in range(args.epochs):
     epoch_start_time = time.perf_counter()
     running_loss = 0.0
-    running_total_tokens = 0
+    running_total_samples = 0
     next_progress_print_at = progress_print_every_samples
-    epoch_total_tokens = int(train_mask.sum().item())
+    epoch_total_samples = len(train_loader.dataset)
     diagnostics_ran = False
 
     net.train()
@@ -642,27 +643,26 @@ for epoch in range(args.epochs):
         # Forward pass: CRF loss is computed internally
         loss = net(xb, tags=yb, mask=mb)
 
-        # Track token progress only during training.
-        running_total_tokens += int(mb.sum().item())
         running_loss += (-loss).item() * batch_size_eff
+        running_total_samples += batch_size_eff
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        # progress by tokens
-        running_total = min(epoch_total_tokens, running_total_tokens)
+        # progress by samples
+        running_total = min(epoch_total_samples, running_total_samples)
         while running_total >= next_progress_print_at:
-            progress_pct = (running_total / max(1, epoch_total_tokens)) * 100.0
+            progress_pct = (running_total / max(1, epoch_total_samples)) * 100.0
             epoch_elapsed_s = time.perf_counter() - epoch_start_time
             print(
                 f"Epoch {epoch + 1}/{args.epochs} progress | "
-                f"tokens: {running_total}/{epoch_total_tokens} ({progress_pct:.2f}%) | "
+                f"samples: {running_total}/{epoch_total_samples} ({progress_pct:.2f}%) | "
                 f"elapsed_s: {epoch_elapsed_s:.2f}"
             )
             next_progress_print_at += progress_print_every_samples
 
-    epoch_loss = running_loss / max(1, running_total_tokens)
+    epoch_loss = running_loss / max(1, running_total_samples)
     epoch_acc = evaluate_epoch_accuracy(net, train_loader, device)
     epoch_losses.append(float(epoch_loss))
     epoch_accuracies.append(float(epoch_acc))
